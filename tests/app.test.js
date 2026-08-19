@@ -28,11 +28,27 @@ test("health and empty bookshelf endpoints respond", async () => {
   await withServer({}, async (baseUrl) => {
     const health = await fetch(`${baseUrl}/api/health`);
     assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { status: "ok" });
+    assert.deepEqual(await health.json(), { status: "ok", app: "JnC Bookshelf", version: "1.1.0" });
+    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.1.0");
 
     const response = await fetch(`${baseUrl}/api/books?sort=title&order=asc`);
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { books: [], total: 0 });
+  });
+});
+
+test("serves the styled app shell with safe cache headers", async () => {
+  await withServer({}, async (baseUrl) => {
+    const page = await fetch(baseUrl);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-type"), /^text\/html/);
+    assert.equal(page.headers.get("cache-control"), "no-store");
+    assert.match(await page.text(), /styles\.css\?v=1\.1\.0/);
+
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.1.0`);
+    assert.equal(stylesheet.status, 200);
+    assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
+    assert.match(await stylesheet.text(), /\.site-header/);
   });
 });
 

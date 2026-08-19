@@ -1,6 +1,6 @@
 {
   "name": "jnc-bookshelf",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "A private, self-hosted bookshelf with ISBN camera scanning.",

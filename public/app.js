@@ -330,6 +330,6 @@ elements.bookDialog.addEventListener("click", (event) => {
 });
 
 if (!window.isSecureContext) document.querySelector("#camera-notice").hidden = false;
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});
 
 Promise.all([loadBooks(), loadStats()]);

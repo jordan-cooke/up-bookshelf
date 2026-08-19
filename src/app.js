@@ -18,6 +18,7 @@ import {
 import { validateBook, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export const APP_VERSION = "1.1.0";
 
 function secureCompare(actual, expected) {
   const actualBuffer = Buffer.from(actual);
@@ -54,6 +55,10 @@ export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "
   if (trustProxy) app.set("trust proxy", 1);
 
   app.disable("x-powered-by");
+  app.use((_request, response, next) => {
+    response.set("X-JnC-Bookshelf-Version", APP_VERSION);
+    next();
+  });
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -74,7 +79,7 @@ export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "
   app.get("/api/health", async (_request, response, next) => {
     try {
       database.prepare("SELECT 1").get();
-      response.json({ status: "ok" });
+      response.json({ status: "ok", app: "JnC Bookshelf", version: APP_VERSION });
     } catch (error) {
       next(error);
     }
@@ -168,9 +173,20 @@ export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "
     }
   });
 
-  app.use("/vendor/html5-qrcode", express.static(path.join(ROOT, "node_modules", "html5-qrcode"), { maxAge: "1y" }));
-  app.use(express.static(path.join(ROOT, "public"), { maxAge: "1h" }));
-  app.get("/{*path}", (_request, response) => response.sendFile(path.join(ROOT, "public", "index.html")));
+  app.use("/vendor/html5-qrcode", express.static(path.join(ROOT, "node_modules", "html5-qrcode"), { maxAge: "1y", immutable: true }));
+  app.use(
+    express.static(path.join(ROOT, "public"), {
+      etag: true,
+      maxAge: 0,
+      setHeaders(response, filePath) {
+        response.setHeader("Cache-Control", filePath.endsWith("index.html") ? "no-store" : "no-cache");
+      },
+    }),
+  );
+  app.get("/{*path}", (_request, response) => {
+    response.set("Cache-Control", "no-store");
+    response.sendFile(path.join(ROOT, "public", "index.html"));
+  });
 
   app.use((error, _request, response, _next) => {
     if (error instanceof ValidationError) return response.status(error.status).json({ error: error.message });

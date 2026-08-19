@@ -107,12 +107,38 @@ Stop the app before making a raw filesystem copy of the SQLite files so the data
 
 ## Updating and operations
 
-To update from Gitea:
+To update from Gitea with Compose Manager:
 
 ```bash
 git pull
 docker compose up -d --build
 ```
+
+If Unraid does not have Docker Compose installed, rebuild and replace only the app container with:
+
+```bash
+cd /mnt/user/appdata/jnc-bookshelf
+git pull
+docker build --no-cache -t jnc-bookshelf:latest .
+docker stop jnc-bookshelf
+docker rm jnc-bookshelf
+docker run -d \
+  --name jnc-bookshelf \
+  --restart unless-stopped \
+  -p 3080:3000 \
+  --env-file .env \
+  -e DB_PATH=/data/bookshelf.sqlite \
+  -v /mnt/user/appdata/jnc-bookshelf/data:/data \
+  jnc-bookshelf:latest
+```
+
+Replacing the container does not remove the library: the SQLite database remains in `/mnt/user/appdata/jnc-bookshelf/data`. Confirm the running release with:
+
+```bash
+curl http://127.0.0.1:3080/api/health
+```
+
+Release 1.1.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.1.0"}`. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it; the app shell now bypasses stale caches during upgrades.
 
 Useful commands:
 

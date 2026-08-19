@@ -1,5 +1,5 @@
-const CACHE = "jnc-bookshelf-v2";
-const SHELL = ["/", "/styles.css", "/app.js", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
+const CACHE = "jnc-bookshelf-v3";
+const SHELL = ["/", "/styles.css?v=1.1.0", "/app.js?v=1.1.0", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
@@ -17,10 +17,17 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))),
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (event.request.mode === "navigate") return caches.match("/");
+        return Response.error();
+      }),
   );
 });
