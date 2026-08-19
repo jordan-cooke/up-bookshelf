@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#315c49" />
+    <meta name="description" content="A private, self-hosted home library." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>Hearthside Bookshelf</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#library">Skip to library</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Hearthside Bookshelf home">
+        <img src="/icon.svg" alt="" width="42" height="42" />
+        <span><strong>Hearthside</strong><small>bookshelf</small></span>
+      </a>
+      <div class="header-actions">
+        <a class="icon-button export-link" href="/api/export" download title="Download a JSON backup" aria-label="Download backup">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v3h14v-3" /></svg>
+        </a>
+        <button class="button button-secondary desktop-add" type="button" data-action="add">Add manually</button>
+        <button class="button button-primary" type="button" data-action="scan">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 8v8m3-8v8m3-8v8m3-8v8" /></svg>
+          Scan a book
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="welcome-title">
+        <div>
+          <p class="eyebrow">Your home library</p>
+          <h1 id="welcome-title">Every good story,<br /><em>right where you left it.</em></h1>
+          <p class="hero-copy">Scan the ISBN barcode on a book to tuck it onto your digital shelf.</p>
+        </div>
+        <div class="stats" aria-label="Library statistics">
+          <div><strong id="stat-total">0</strong><span>books</span></div>
+          <div><strong id="stat-reading">0</strong><span>reading</span></div>
+          <div><strong id="stat-read">0</strong><span>finished</span></div>
+        </div>
+      </section>
+
+      <aside class="notice" id="camera-notice" hidden>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 4.9 2.8 18a1.4 1.4 0 0 0 1.2 2h16a1.4 1.4 0 0 0 1.2-2L13.7 4.9a2 2 0 0 0-3.4 0Z" /></svg>
+        <p><strong>Live camera scanning needs HTTPS.</strong> You can still choose or take a barcode photo, or type the ISBN manually.</p>
+      </aside>
+
+      <section class="library" id="library" aria-labelledby="library-title">
+        <div class="library-heading">
+          <div>
+            <p class="eyebrow">The collection</p>
+            <h2 id="library-title">My bookshelf</h2>
+          </div>
+          <p class="result-count" id="result-count" aria-live="polite">Loading your shelf…</p>
+        </div>
+
+        <div class="toolbar">
+          <label class="search-field">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+            <span class="sr-only">Search books</span>
+            <input id="search" type="search" placeholder="Search title, author, or ISBN…" autocomplete="off" />
+          </label>
+          <label>
+            <span class="sr-only">Filter by reading status</span>
+            <select id="status-filter">
+              <option value="">All books</option>
+              <option value="unread">Want to read</option>
+              <option value="reading">Reading now</option>
+              <option value="read">Finished</option>
+              <option value="dnf">Did not finish</option>
+            </select>
+          </label>
+          <label>
+            <span class="sr-only">Sort books</span>
+            <select id="sort">
+              <option value="added:desc">Newest added</option>
+              <option value="added:asc">Oldest added</option>
+              <option value="title:asc">Title A–Z</option>
+              <option value="title:desc">Title Z–A</option>
+              <option value="author:asc">Author A–Z</option>
+              <option value="rating:desc">Highest rated</option>
+              <option value="published:desc">Newest published</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="book-grid" id="book-grid" aria-live="polite" aria-busy="true"></div>
+
+        <div class="empty-state" id="empty-state" hidden>
+          <div class="empty-books" aria-hidden="true"><i></i><i></i><i></i></div>
+          <h3>Your shelves are waiting</h3>
+          <p>Scan the barcode on your first book and we’ll find the title, author, and cover.</p>
+          <button class="button button-primary" type="button" data-action="scan">Scan your first book</button>
+          <button class="text-button" type="button" data-action="add">or add it manually</button>
+        </div>
+      </section>
+    </main>
+
+    <button class="floating-scan" type="button" data-action="scan" aria-label="Scan a book">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 8v8m3-8v8m3-8v8m3-8v8" /></svg>
+    </button>
+
+    <dialog class="modal scanner-modal" id="scanner-dialog">
+      <div class="modal-header">
+        <div><p class="eyebrow">Quick add</p><h2>Scan the ISBN barcode</h2></div>
+        <button class="close-button" type="button" data-close="scanner-dialog" aria-label="Close scanner">×</button>
+      </div>
+      <p class="modal-intro">Find the barcode on the back cover. Hold it steady inside the frame, or take a clear photo of it.</p>
+      <div class="scanner-shell" id="scanner-reader"></div>
+      <div class="lookup-progress" id="lookup-progress" hidden>
+        <span class="spinner" aria-hidden="true"></span><span>Looking up that book…</span>
+      </div>
+      <div class="manual-isbn">
+        <span>or enter the ISBN</span>
+        <form id="isbn-form">
+          <label class="sr-only" for="isbn-input">ISBN</label>
+          <input id="isbn-input" name="isbn" inputmode="numeric" autocomplete="off" placeholder="978…" maxlength="17" required />
+          <button class="button button-secondary" type="submit">Look up</button>
+        </form>
+      </div>
+    </dialog>
+
+    <dialog class="modal book-modal" id="book-dialog">
+      <form id="book-form">
+        <div class="modal-header sticky-modal-header">
+          <div><p class="eyebrow" id="form-eyebrow">New book</p><h2 id="form-title">Add to bookshelf</h2></div>
+          <button class="close-button" type="button" data-close="book-dialog" aria-label="Close book form">×</button>
+        </div>
+        <input type="hidden" name="id" />
+        <input type="hidden" name="metadataSource" />
+
+        <div class="form-layout">
+          <div class="cover-preview" id="cover-preview"><span>Cover<br />preview</span></div>
+          <div class="form-fields">
+            <div class="field field-wide"><label for="book-title">Title <b>*</b></label><input id="book-title" name="title" required maxlength="500" /></div>
+            <div class="field field-wide"><label for="book-subtitle">Subtitle</label><input id="book-subtitle" name="subtitle" maxlength="500" /></div>
+            <div class="field field-wide"><label for="book-authors">Author(s)</label><input id="book-authors" name="authors" placeholder="Separate multiple authors with commas" /></div>
+            <div class="field"><label for="book-isbn13">ISBN-13</label><input id="book-isbn13" name="isbn13" inputmode="numeric" maxlength="17" /></div>
+            <div class="field"><label for="book-isbn10">ISBN-10</label><input id="book-isbn10" name="isbn10" maxlength="13" /></div>
+            <div class="field"><label for="book-publisher">Publisher</label><input id="book-publisher" name="publisher" /></div>
+            <div class="field"><label for="book-published">Published</label><input id="book-published" name="publishedDate" placeholder="e.g. 2024" /></div>
+            <div class="field"><label for="book-pages">Pages</label><input id="book-pages" name="pageCount" inputmode="numeric" type="number" min="0" /></div>
+            <div class="field"><label for="book-language">Language</label><input id="book-language" name="language" maxlength="30" /></div>
+            <div class="field field-wide"><label for="book-categories">Genres / subjects</label><input id="book-categories" name="categories" placeholder="Fantasy, Mystery, History…" /></div>
+            <div class="field field-wide"><label for="book-cover">Cover image URL</label><input id="book-cover" name="coverUrl" type="url" /></div>
+            <div class="field"><label for="book-status">Reading status</label><select id="book-status" name="readingStatus"><option value="unread">Want to read</option><option value="reading">Reading now</option><option value="read">Finished</option><option value="dnf">Did not finish</option></select></div>
+            <div class="field"><label for="book-rating">Rating</label><select id="book-rating" name="rating"><option value="">Not rated</option><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option></select></div>
+            <div class="field field-wide"><label for="book-description">Description</label><textarea id="book-description" name="description" rows="4"></textarea></div>
+            <div class="field field-wide"><label for="book-notes">Personal notes</label><textarea id="book-notes" name="notes" rows="3" placeholder="Favorite quotes, who lent it to you, thoughts…"></textarea></div>
+          </div>
+        </div>
+
+        <div class="form-error" id="form-error" role="alert" hidden></div>
+        <div class="modal-actions">
+          <button class="text-button danger-button" id="delete-book" type="button" hidden>Remove book</button>
+          <span class="action-spacer"></span>
+          <button class="button button-secondary" type="button" data-close="book-dialog">Cancel</button>
+          <button class="button button-primary" id="save-book" type="submit">Add to shelf</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
