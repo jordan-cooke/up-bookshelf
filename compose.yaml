@@ -1,10 +1,10 @@
-name: hearthside-bookshelf
+name: jnc-bookshelf
 
 services:
   app:
     build: .
-    image: hearthside-bookshelf:latest
-    container_name: bookshelf
+    image: jnc-bookshelf:latest
+    container_name: jnc-bookshelf
     restart: unless-stopped
     ports:
       - "${APP_PORT:-3080}:3000"
@@ -21,11 +21,11 @@ services:
       db:
         condition: service_healthy
     networks:
-      - bookshelf
+      - jnc-bookshelf
 
   db:
     image: mariadb:11.4
-    container_name: bookshelf-db
+    container_name: jnc-bookshelf-db
     restart: unless-stopped
     environment:
       MARIADB_DATABASE: "${DB_NAME:-bookshelf}"
@@ -41,8 +41,8 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - bookshelf
+      - jnc-bookshelf
 
 networks:
-  bookshelf:
-    name: bookshelf
+  jnc-bookshelf:
+    name: jnc-bookshelf

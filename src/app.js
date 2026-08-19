@@ -37,7 +37,7 @@ function optionalBasicAuth(password) {
         // Fall through to the authentication prompt.
       }
     }
-    response.set("WWW-Authenticate", 'Basic realm="Hearthside Bookshelf", charset="UTF-8"');
+    response.set("WWW-Authenticate", 'Basic realm="JnC Bookshelf", charset="UTF-8"');
     return response.status(401).send("Authentication required");
   };
 }

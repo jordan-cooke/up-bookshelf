@@ -1,6 +1,6 @@
 {
-  "name": "Hearthside Bookshelf",
-  "short_name": "Bookshelf",
+  "name": "JnC Bookshelf",
+  "short_name": "JnC Bookshelf",
   "description": "A private, self-hosted home library.",
   "start_url": "/",
   "display": "standalone",

@@ -55,7 +55,7 @@ export function normalizeOpenLibraryBook(payload, requestedIsbn) {
 
 async function fetchJson(url, timeoutMs = 8000) {
   const response = await fetch(url, {
-    headers: { "User-Agent": "HearthsideBookshelf/1.0" },
+    headers: { "User-Agent": "JnCBookshelf/1.0" },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new Error(`Metadata provider returned ${response.status}`);

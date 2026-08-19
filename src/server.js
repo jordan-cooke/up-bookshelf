@@ -35,7 +35,7 @@ async function waitForDatabase(attempts = 30) {
 await waitForDatabase();
 const app = createApp({ pool, appPassword: config.appPassword, trustProxy: config.trustProxy });
 const server = app.listen(config.port, "0.0.0.0", () => {
-  console.log(`Hearthside Bookshelf is listening on port ${config.port}.`);
+  console.log(`JnC Bookshelf is listening on port ${config.port}.`);
 });
 
 async function shutDown(signal) {

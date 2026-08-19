@@ -1,4 +1,4 @@
-const CACHE = "hearthside-v1";
+const CACHE = "jnc-bookshelf-v2";
 const SHELL = ["/", "/styles.css", "/app.js", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
 
 self.addEventListener("install", (event) => {

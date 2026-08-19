@@ -1,4 +1,4 @@
-# Hearthside Bookshelf
+# JnC Bookshelf
 
 A private, self-hosted home library designed for a phone. Scan the ISBN barcode on a book, confirm the details, and add it to a searchable digital bookshelf.
 
@@ -22,13 +22,22 @@ The browser sends ISBNs to the two metadata providers, but the library, ratings,
 
 The included Compose stack builds the app locally and runs it beside MariaDB. A typical Unraid installation uses the **Compose Manager** plugin from Community Applications, but the same commands work from an Unraid terminal with Docker Compose installed.
 
-1. Copy this entire `bookshelf` directory to:
+1. Open the Unraid terminal and clone the Gitea repository into appdata:
 
-   ```text
-   /mnt/user/appdata/hearthside-bookshelf
+   ```bash
+   cd /mnt/user/appdata
+   git clone http://10.1.10.221:3008/jnc/Bookshelf.git jnc-bookshelf
+   cd jnc-bookshelf
    ```
 
-2. In that directory, copy `.env.example` to `.env`.
+   If the repository is private, Git will prompt for the Gitea username and a personal access token. If Git is unavailable on Unraid, download the repository ZIP from Gitea and extract it to `/mnt/user/appdata/jnc-bookshelf` instead.
+
+2. Create the environment file:
+
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
 
 3. Edit `.env`. At minimum, replace both database passwords and use an Unraid appdata path:
 
@@ -38,7 +47,7 @@ The included Compose stack builds the app locally and runs it beside MariaDB. A 
    DB_USER=bookshelf
    DB_PASSWORD=use-a-long-random-password
    DB_ROOT_PASSWORD=use-a-different-long-random-password
-   DB_DATA_PATH=/mnt/user/appdata/hearthside-bookshelf/mariadb
+   DB_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/mariadb
 
    # Optional login for the web app. Username: bookshelf
    APP_PASSWORD=
@@ -49,7 +58,7 @@ The included Compose stack builds the app locally and runs it beside MariaDB. A 
 4. Start the stack from Compose Manager, or run:
 
    ```bash
-   cd /mnt/user/appdata/hearthside-bookshelf
+   cd /mnt/user/appdata/jnc-bookshelf
    docker compose up -d --build
    ```
 
@@ -93,7 +102,7 @@ The app shell can open when the network briefly drops, but adding, editing, sear
 The download icon in the header exports the human-readable collection as JSON. For a complete restorable backup, include this directory in your normal Unraid appdata backup:
 
 ```text
-/mnt/user/appdata/hearthside-bookshelf/mariadb
+/mnt/user/appdata/jnc-bookshelf/mariadb
 ```
 
 Stop the stack before making a raw filesystem copy of MariaDB, or use a MariaDB-aware backup tool. The JSON export is convenient for inspection and migration; the MariaDB appdata backup is the disaster-recovery copy.
