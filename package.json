@@ -10,12 +10,11 @@
     "test": "node --test --test-isolation=none"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.16"
   },
   "dependencies": {
     "express": "5.2.1",
     "helmet": "8.3.0",
-    "html5-qrcode": "2.3.8",
-    "mysql2": "3.23.3"
+    "html5-qrcode": "2.3.8"
   }
 }

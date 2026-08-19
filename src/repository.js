@@ -63,41 +63,44 @@ function valuesFor(book) {
   ];
 }
 
-export async function initializeDatabase(pool) {
-  await pool.query(`
+export function initializeDatabase(database) {
+  database.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA foreign_keys = ON;
+
     CREATE TABLE IF NOT EXISTS books (
-      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      title VARCHAR(500) NOT NULL,
-      subtitle VARCHAR(500) NOT NULL DEFAULT '',
-      authors JSON NOT NULL,
-      author_sort VARCHAR(200) NOT NULL DEFAULT '',
-      isbn_10 VARCHAR(10) NULL,
-      isbn_13 VARCHAR(13) NULL,
-      publisher VARCHAR(300) NOT NULL DEFAULT '',
-      published_date VARCHAR(50) NOT NULL DEFAULT '',
-      description TEXT NOT NULL,
-      page_count INT UNSIGNED NULL,
-      categories JSON NOT NULL,
-      cover_url VARCHAR(2000) NULL,
-      language VARCHAR(30) NOT NULL DEFAULT '',
-      reading_status ENUM('unread', 'reading', 'read', 'dnf') NOT NULL DEFAULT 'unread',
-      rating TINYINT UNSIGNED NULL,
-      notes TEXT NOT NULL,
-      metadata_source VARCHAR(100) NOT NULL DEFAULT '',
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY books_isbn_10_unique (isbn_10),
-      UNIQUE KEY books_isbn_13_unique (isbn_13),
-      INDEX books_title_index (title),
-      INDEX books_author_index (author_sort),
-      INDEX books_status_index (reading_status),
-      INDEX books_created_index (created_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      subtitle TEXT NOT NULL DEFAULT '',
+      authors TEXT NOT NULL DEFAULT '[]',
+      author_sort TEXT NOT NULL DEFAULT '',
+      isbn_10 TEXT UNIQUE,
+      isbn_13 TEXT UNIQUE,
+      publisher TEXT NOT NULL DEFAULT '',
+      published_date TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      page_count INTEGER CHECK (page_count IS NULL OR page_count >= 0),
+      categories TEXT NOT NULL DEFAULT '[]',
+      cover_url TEXT,
+      language TEXT NOT NULL DEFAULT '',
+      reading_status TEXT NOT NULL DEFAULT 'unread'
+        CHECK (reading_status IN ('unread', 'reading', 'read', 'dnf')),
+      rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
+      notes TEXT NOT NULL DEFAULT '',
+      metadata_source TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS books_title_index ON books (title);
+    CREATE INDEX IF NOT EXISTS books_author_index ON books (author_sort);
+    CREATE INDEX IF NOT EXISTS books_status_index ON books (reading_status);
+    CREATE INDEX IF NOT EXISTS books_created_index ON books (created_at);
   `);
 }
 
-export async function listBooks(pool, options = {}) {
+export function listBooks(database, options = {}) {
   const search = String(options.search || "").trim();
   const status = ["unread", "reading", "read", "dnf"].includes(options.status) ? options.status : "";
   const where = [];
@@ -118,61 +121,55 @@ export async function listBooks(pool, options = {}) {
   const direction = options.order === "asc" ? "ASC" : "DESC";
   const limit = Math.min(Math.max(Number(options.limit) || 250, 1), 1000);
 
-  const [rows] = await pool.execute(
-    `SELECT * FROM books ${whereSql} ORDER BY ${sortColumn} ${direction}, id ${direction} LIMIT ${limit}`,
-    parameters,
-  );
-  const [[count]] = await pool.execute(`SELECT COUNT(*) AS total FROM books ${whereSql}`, parameters);
+  const rows = database
+    .prepare(`SELECT * FROM books ${whereSql} ORDER BY ${sortColumn} ${direction}, id ${direction} LIMIT ${limit}`)
+    .all(...parameters);
+  const count = database.prepare(`SELECT COUNT(*) AS total FROM books ${whereSql}`).get(...parameters);
   return { books: rows.map(mapBook), total: Number(count.total) };
 }
 
-export async function getBook(pool, id) {
-  const [[row]] = await pool.execute("SELECT * FROM books WHERE id = ?", [id]);
-  return mapBook(row);
+export function getBook(database, id) {
+  return mapBook(database.prepare("SELECT * FROM books WHERE id = ?").get(id));
 }
 
-export async function findByIsbn(pool, isbn) {
-  const [[row]] = await pool.execute("SELECT * FROM books WHERE isbn_10 = ? OR isbn_13 = ? LIMIT 1", [isbn, isbn]);
-  return mapBook(row);
+export function findByIsbn(database, isbn) {
+  return mapBook(database.prepare("SELECT * FROM books WHERE isbn_10 = ? OR isbn_13 = ? LIMIT 1").get(isbn, isbn));
 }
 
-export async function createBook(pool, book) {
-  const [result] = await pool.execute(
-    `INSERT INTO books (
+export function createBook(database, book) {
+  const result = database.prepare(`
+    INSERT INTO books (
       title, subtitle, authors, author_sort, isbn_10, isbn_13, publisher, published_date,
       description, page_count, categories, cover_url, language, reading_status, rating, notes, metadata_source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    valuesFor(book),
-  );
-  return getBook(pool, result.insertId);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(...valuesFor(book));
+  return getBook(database, result.lastInsertRowid);
 }
 
-export async function updateBook(pool, id, book) {
-  const [result] = await pool.execute(
-    `UPDATE books SET
+export function updateBook(database, id, book) {
+  const result = database.prepare(`
+    UPDATE books SET
       title = ?, subtitle = ?, authors = ?, author_sort = ?, isbn_10 = ?, isbn_13 = ?, publisher = ?, published_date = ?,
       description = ?, page_count = ?, categories = ?, cover_url = ?, language = ?, reading_status = ?, rating = ?,
-      notes = ?, metadata_source = ?
-    WHERE id = ?`,
-    [...valuesFor(book), id],
-  );
-  return result.affectedRows ? getBook(pool, id) : null;
+      notes = ?, metadata_source = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(...valuesFor(book), id);
+  return result.changes ? getBook(database, id) : null;
 }
 
-export async function deleteBook(pool, id) {
-  const [result] = await pool.execute("DELETE FROM books WHERE id = ?", [id]);
-  return result.affectedRows > 0;
+export function deleteBook(database, id) {
+  return database.prepare("DELETE FROM books WHERE id = ?").run(id).changes > 0;
 }
 
-export async function libraryStats(pool) {
-  const [[row]] = await pool.query(`
+export function libraryStats(database) {
+  const row = database.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(reading_status = 'read') AS read_count,
-      SUM(reading_status = 'reading') AS reading_count,
-      SUM(reading_status = 'unread') AS unread_count
+      SUM(CASE WHEN reading_status = 'read' THEN 1 ELSE 0 END) AS read_count,
+      SUM(CASE WHEN reading_status = 'reading' THEN 1 ELSE 0 END) AS reading_count,
+      SUM(CASE WHEN reading_status = 'unread' THEN 1 ELSE 0 END) AS unread_count
     FROM books
-  `);
+  `).get();
   return {
     total: Number(row.total || 0),
     read: Number(row.read_count || 0),
@@ -181,7 +178,6 @@ export async function libraryStats(pool) {
   };
 }
 
-export async function exportBooks(pool) {
-  const [rows] = await pool.query("SELECT * FROM books ORDER BY created_at ASC, id ASC");
-  return rows.map(mapBook);
+export function exportBooks(database) {
+  return database.prepare("SELECT * FROM books ORDER BY created_at ASC, id ASC").all().map(mapBook);
 }

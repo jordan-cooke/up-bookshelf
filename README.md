@@ -16,11 +16,11 @@ A private, self-hosted home library designed for a phone. Scan the ISBN barcode 
 - Installs to a phone home screen as a PWA
 - Supports an optional app password
 
-The browser sends ISBNs to the two metadata providers, but the library, ratings, and notes stay in your own MariaDB database.
+The browser sends ISBNs to the two metadata providers, but the library, ratings, and notes stay in a private SQLite database on your Unraid server.
 
 ## Unraid quick start
 
-The included Compose stack builds the app locally and runs it beside MariaDB. A typical Unraid installation uses the **Compose Manager** plugin from Community Applications, but the same commands work from an Unraid terminal with Docker Compose installed.
+The included Compose stack builds one self-contained app image with an embedded SQLite database. A typical Unraid installation uses the **Compose Manager** plugin from Community Applications, but the same commands work from an Unraid terminal with Docker Compose installed.
 
 1. Open the Unraid terminal and clone the Gitea repository into appdata:
 
@@ -39,21 +39,18 @@ The included Compose stack builds the app locally and runs it beside MariaDB. A 
    nano .env
    ```
 
-3. Edit `.env`. At minimum, replace both database passwords and use an Unraid appdata path:
+3. Point the persistent data directory at Unraid appdata and optionally set an app password:
 
    ```dotenv
    APP_PORT=3080
-   DB_NAME=bookshelf
-   DB_USER=bookshelf
-   DB_PASSWORD=use-a-long-random-password
-   DB_ROOT_PASSWORD=use-a-different-long-random-password
-   DB_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/mariadb
+   APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data
 
    # Optional login for the web app. Username: bookshelf
    APP_PASSWORD=
-   ```
 
-   Use letters, numbers, dashes, and underscores in `.env` passwords. If a value contains `#` or spaces, quote it.
+   # Set to 1 after configuring a trusted HTTPS reverse proxy
+   TRUST_PROXY=0
+   ```
 
 4. Start the stack from Compose Manager, or run:
 
@@ -68,7 +65,7 @@ The included Compose stack builds the app locally and runs it beside MariaDB. A 
    http://YOUR-UNRAID-IP:3080
    ```
 
-The first start can take a minute while the app image builds and MariaDB initializes. The database files remain in the `DB_DATA_PATH` directory across container updates.
+The first start can take a minute while the app image builds. The app automatically creates `/mnt/user/appdata/jnc-bookshelf/data/bookshelf.sqlite`; that file remains in place across container updates.
 
 ## HTTPS and phone camera access
 
@@ -102,16 +99,17 @@ The app shell can open when the network briefly drops, but adding, editing, sear
 The download icon in the header exports the human-readable collection as JSON. For a complete restorable backup, include this directory in your normal Unraid appdata backup:
 
 ```text
-/mnt/user/appdata/jnc-bookshelf/mariadb
+/mnt/user/appdata/jnc-bookshelf/data
 ```
 
-Stop the stack before making a raw filesystem copy of MariaDB, or use a MariaDB-aware backup tool. The JSON export is convenient for inspection and migration; the MariaDB appdata backup is the disaster-recovery copy.
+Stop the app before making a raw filesystem copy of the SQLite files so the database and its write-ahead log remain consistent. The JSON export is convenient for inspection and migration; the appdata directory is the disaster-recovery copy. Unraid backup tools that stop containers before copying appdata are suitable.
 
 ## Updating and operations
 
-After replacing the app source with a newer version:
+To update from Gitea:
 
 ```bash
+git pull
 docker compose up -d --build
 ```
 
@@ -120,15 +118,14 @@ Useful commands:
 ```bash
 docker compose ps
 docker compose logs -f app
-docker compose logs -f db
 docker compose down
 ```
 
-`docker compose down` removes the containers and network, but it does not delete the bind-mounted MariaDB data.
+`docker compose down` removes the container and network, but it does not delete the bind-mounted SQLite data.
 
 ## Local development
 
-Requirements: Node.js 20+ and a reachable MariaDB database.
+Requirements: Node.js 22.16 or newer. SQLite is built into Node, so no separate database server is required.
 
 ```bash
 pnpm install
@@ -136,7 +133,7 @@ cp .env.example .env
 pnpm start
 ```
 
-For development, set `DB_HOST`, `DB_PORT`, and the other database variables for your local MariaDB. Run the automated checks with:
+The local database defaults to `data/bookshelf.sqlite`; override it with `DB_PATH` if needed. Run the automated checks with:
 
 ```bash
 pnpm test
@@ -146,7 +143,7 @@ pnpm test
 
 ```text
 bookshelf/
-├── compose.yaml       # App + MariaDB stack
+├── compose.yaml       # Single-container app stack
 ├── Dockerfile
 ├── public/            # Mobile PWA interface
 ├── src/               # API, validation, metadata, and database code

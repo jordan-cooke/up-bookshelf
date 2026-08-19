@@ -1,4 +1,6 @@
+import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
+import { initializeDatabase } from "../src/repository.js";
 
 const sampleRows = [
   {
@@ -69,27 +71,31 @@ const sampleRows = [
   },
 ];
 
-const pool = {
-  async query(sql) {
-    if (sql.includes("SELECT 1")) return [[{ ok: 1 }]];
-    if (sql.includes("SUM(reading_status")) {
-      return [[{ total: 3, read_count: 1, reading_count: 1, unread_count: 1 }]];
-    }
-    if (sql.includes("SELECT * FROM books")) return [sampleRows];
-    return [[]];
-  },
-  async execute(sql, parameters = []) {
-    if (sql.includes("COUNT(*)")) return [[{ total: sampleRows.length }]];
-    if (sql.includes("WHERE id = ?")) return [[sampleRows.find((row) => row.id === Number(parameters[0]))]];
-    if (sql.startsWith("SELECT * FROM books")) return [sampleRows];
-    return [[]];
-  },
-};
+const database = new DatabaseSync(":memory:");
+initializeDatabase(database);
+const insert = database.prepare(`
+  INSERT INTO books (
+    id, title, subtitle, authors, author_sort, isbn_10, isbn_13, publisher, published_date,
+    description, page_count, categories, cover_url, language, reading_status, rating, notes,
+    metadata_source, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+for (const row of sampleRows) {
+  insert.run(
+    row.id, row.title, row.subtitle, row.authors, row.author_sort, row.isbn_10, row.isbn_13,
+    row.publisher, row.published_date, row.description, row.page_count, row.categories,
+    row.cover_url, row.language, row.reading_status, row.rating, row.notes, row.metadata_source,
+    row.created_at.toISOString(), row.updated_at.toISOString(),
+  );
+}
 
-const app = createApp({ pool });
+const app = createApp({ database });
 const server = app.listen(4173, "127.0.0.1", () => console.log("Fixture bookshelf: http://127.0.0.1:4173"));
 const keepAlive = setInterval(() => {}, 60_000);
 process.on("SIGINT", () => {
   clearInterval(keepAlive);
-  server.close(() => process.exit(0));
+  server.close(() => {
+    database.close();
+    process.exit(0);
+  });
 });

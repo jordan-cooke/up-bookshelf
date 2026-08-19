@@ -49,7 +49,7 @@ function numericId(request, response, next) {
   return next();
 }
 
-export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", trustProxy = false }) {
+export function createApp({ database, lookup = lookupBookByIsbn, appPassword = "", trustProxy = false }) {
   const app = express();
   if (trustProxy) app.set("trust proxy", 1);
 
@@ -73,7 +73,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.get("/api/health", async (_request, response, next) => {
     try {
-      await pool.query("SELECT 1");
+      database.prepare("SELECT 1").get();
       response.json({ status: "ok" });
     } catch (error) {
       next(error);
@@ -83,7 +83,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
   app.get("/api/books", async (request, response, next) => {
     try {
       response.json(
-        await listBooks(pool, {
+        await listBooks(database, {
           search: request.query.q,
           status: request.query.status,
           sort: request.query.sort,
@@ -98,7 +98,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.get("/api/books/:id", numericId, async (request, response, next) => {
     try {
-      const book = await getBook(pool, request.bookId);
+      const book = await getBook(database, request.bookId);
       if (!book) return response.status(404).json({ error: "Book not found." });
       return response.json(book);
     } catch (error) {
@@ -108,7 +108,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.post("/api/books", async (request, response, next) => {
     try {
-      const book = await createBook(pool, validateBook(request.body));
+      const book = await createBook(database, validateBook(request.body));
       response.status(201).json(book);
     } catch (error) {
       next(error);
@@ -117,7 +117,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.put("/api/books/:id", numericId, async (request, response, next) => {
     try {
-      const book = await updateBook(pool, request.bookId, validateBook(request.body));
+      const book = await updateBook(database, request.bookId, validateBook(request.body));
       if (!book) return response.status(404).json({ error: "Book not found." });
       return response.json(book);
     } catch (error) {
@@ -127,7 +127,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.delete("/api/books/:id", numericId, async (request, response, next) => {
     try {
-      if (!(await deleteBook(pool, request.bookId))) return response.status(404).json({ error: "Book not found." });
+      if (!(await deleteBook(database, request.bookId))) return response.status(404).json({ error: "Book not found." });
       return response.status(204).end();
     } catch (error) {
       return next(error);
@@ -140,7 +140,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
       if (!isValidIsbn10(isbn) && !isValidIsbn13(isbn)) {
         return response.status(400).json({ error: "That barcode is not a valid ISBN-10 or ISBN-13." });
       }
-      const existing = await findByIsbn(pool, isbn);
+      const existing = await findByIsbn(database, isbn);
       if (existing) return response.json({ existing, book: null });
       const book = await lookup(isbn);
       if (!book) return response.status(404).json({ error: "No book metadata was found. You can still add it manually.", isbn });
@@ -152,7 +152,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.get("/api/stats", async (_request, response, next) => {
     try {
-      response.json(await libraryStats(pool));
+      response.json(await libraryStats(database));
     } catch (error) {
       next(error);
     }
@@ -162,7 +162,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
     try {
       const date = new Date().toISOString().slice(0, 10);
       response.attachment(`bookshelf-backup-${date}.json`);
-      response.json({ version: 1, exportedAt: new Date().toISOString(), books: await exportBooks(pool) });
+      response.json({ version: 1, exportedAt: new Date().toISOString(), books: await exportBooks(database) });
     } catch (error) {
       next(error);
     }
@@ -174,7 +174,7 @@ export function createApp({ pool, lookup = lookupBookByIsbn, appPassword = "", t
 
   app.use((error, _request, response, _next) => {
     if (error instanceof ValidationError) return response.status(error.status).json({ error: error.message });
-    if (error?.code === "ER_DUP_ENTRY") {
+    if (error?.code === "ERR_SQLITE_ERROR" && /UNIQUE constraint failed: books\.isbn_/.test(error.message)) {
       return response.status(409).json({ error: "That ISBN is already in your bookshelf." });
     }
     console.error(error);
