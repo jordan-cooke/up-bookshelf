@@ -45,7 +45,8 @@ The included Compose stack builds one self-contained app image with an embedded 
    APP_PORT=3080
    APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data
 
-   # Optional login for the web app. Username: bookshelf
+   # Optional login for the web app
+   APP_USERNAME=jnc
    APP_PASSWORD=
 
    # Set to 1 after configuring a trusted HTTPS reverse proxy

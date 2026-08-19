@@ -97,7 +97,9 @@ test("optional password protects the library but not health checks", async () =>
   await withServer({ appPassword: "secret" }, async (baseUrl) => {
     assert.equal((await fetch(`${baseUrl}/api/health`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/books`)).status, 401);
-    const authorization = `Basic ${Buffer.from("bookshelf:secret").toString("base64")}`;
+    const oldAuthorization = `Basic ${Buffer.from("bookshelf:secret").toString("base64")}`;
+    assert.equal((await fetch(`${baseUrl}/api/books`, { headers: { authorization: oldAuthorization } })).status, 401);
+    const authorization = `Basic ${Buffer.from("jnc:secret").toString("base64")}`;
     assert.equal((await fetch(`${baseUrl}/api/books`, { headers: { authorization } })).status, 200);
   });
 });

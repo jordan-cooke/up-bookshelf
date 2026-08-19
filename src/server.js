@@ -6,6 +6,7 @@ import { initializeDatabase } from "./repository.js";
 
 const config = {
   port: Number(process.env.PORT || 3000),
+  appUsername: process.env.APP_USERNAME?.trim() || "jnc",
   appPassword: process.env.APP_PASSWORD || "",
   trustProxy: process.env.TRUST_PROXY === "1",
   databasePath: process.env.DB_PATH || path.resolve("data", "bookshelf.sqlite"),
@@ -15,7 +16,12 @@ fs.mkdirSync(path.dirname(config.databasePath), { recursive: true });
 const database = new DatabaseSync(config.databasePath, { timeout: 5000 });
 initializeDatabase(database);
 
-const app = createApp({ database, appPassword: config.appPassword, trustProxy: config.trustProxy });
+const app = createApp({
+  database,
+  appUsername: config.appUsername,
+  appPassword: config.appPassword,
+  trustProxy: config.trustProxy,
+});
 const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(`JnC Bookshelf is listening on port ${config.port}.`);
   console.log(`SQLite database: ${config.databasePath}`);

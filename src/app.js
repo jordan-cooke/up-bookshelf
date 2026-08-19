@@ -25,14 +25,14 @@ function secureCompare(actual, expected) {
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-function optionalBasicAuth(password) {
+function optionalBasicAuth(password, expectedUsername) {
   return (request, response, next) => {
     if (!password || request.path === "/api/health") return next();
     const [scheme, token] = (request.headers.authorization || "").split(" ");
     if (scheme === "Basic" && token) {
       try {
         const [username, suppliedPassword] = Buffer.from(token, "base64").toString().split(":");
-        if (username === "bookshelf" && secureCompare(suppliedPassword || "", password)) return next();
+        if (username === expectedUsername && secureCompare(suppliedPassword || "", password)) return next();
       } catch {
         // Fall through to the authentication prompt.
       }
@@ -49,7 +49,7 @@ function numericId(request, response, next) {
   return next();
 }
 
-export function createApp({ database, lookup = lookupBookByIsbn, appPassword = "", trustProxy = false }) {
+export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "jnc", appPassword = "", trustProxy = false }) {
   const app = express();
   if (trustProxy) app.set("trust proxy", 1);
 
@@ -68,7 +68,7 @@ export function createApp({ database, lookup = lookupBookByIsbn, appPassword = "
       },
     }),
   );
-  app.use(optionalBasicAuth(appPassword));
+  app.use(optionalBasicAuth(appPassword, appUsername));
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/api/health", async (_request, response, next) => {
