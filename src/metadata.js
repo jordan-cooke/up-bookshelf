@@ -24,7 +24,14 @@ export function normalizeGoogleBook(payload, requestedIsbn) {
     description: volume.description || "",
     pageCount: Number.isInteger(volume.pageCount) ? volume.pageCount : null,
     categories: volume.categories || [],
-    coverUrl: httpsUrl(volume.imageLinks?.thumbnail || volume.imageLinks?.smallThumbnail),
+    coverUrl: httpsUrl(
+      volume.imageLinks?.extraLarge
+      || volume.imageLinks?.large
+      || volume.imageLinks?.medium
+      || volume.imageLinks?.small
+      || volume.imageLinks?.thumbnail
+      || volume.imageLinks?.smallThumbnail,
+    ),
     language: volume.language || "",
     metadataSource: "Google Books",
   };

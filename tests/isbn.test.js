@@ -15,6 +15,7 @@ test("validates ISBN-10 checksums, including X", () => {
 test("validates ISBN-13 checksums", () => {
   assert.equal(isValidIsbn13("978-0-306-40615-7"), true);
   assert.equal(isValidIsbn13("978-0-306-40615-8"), false);
+  assert.equal(isValidIsbn13("0718619412953"), false, "valid product EANs are not book ISBNs");
 });
 
 test("converts ISBN-10 to ISBN-13", () => {

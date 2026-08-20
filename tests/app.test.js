@@ -31,11 +31,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "JnC Bookshelf",
-      version: "1.2.1",
+      version: "1.3.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.2.1");
+    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.3.0");
 
     const response = await fetch(`${baseUrl}/api/books?sort=title&order=asc`);
     assert.equal(response.status, 200);
@@ -51,15 +51,15 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=1\.2\.1/);
+    assert.match(html, /styles\.css\?v=1\.3\.0/);
     assert.match(html, /capture="environment"/);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.2.1`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.3.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     assert.match(await stylesheet.text(), /\.site-header/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=1.2.1`);
+    const script = await fetch(`${baseUrl}/app.js?v=1.3.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     assert.match(await script.text(), /scanBarcodePhoto/);
@@ -162,9 +162,11 @@ test("duplicate ISBNs are rejected", async () => {
 
 test("invalid ISBN lookups are rejected before provider access", async () => {
   await withServer({ lookup: () => assert.fail("lookup should not run") }, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/lookup/12345`);
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /valid ISBN/);
+    for (const barcode of ["12345", "0718619412953"]) {
+      const response = await fetch(`${baseUrl}/api/lookup/${barcode}`);
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).error, /valid ISBN/);
+    }
   });
 });
 

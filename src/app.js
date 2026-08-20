@@ -18,7 +18,7 @@ import {
 import { validateBook, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "1.2.1";
+export const APP_VERSION = "1.3.0";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
 function numericId(request, response, next) {

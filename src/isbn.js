@@ -16,7 +16,7 @@ export function isValidIsbn10(value) {
 
 export function isValidIsbn13(value) {
   const isbn = cleanIsbn(value);
-  if (!/^\d{13}$/.test(isbn)) return false;
+  if (!/^(?:978|979)\d{10}$/.test(isbn)) return false;
 
   const sum = [...isbn].reduce(
     (total, character, index) => total + Number(character) * (index % 2 === 0 ? 1 : 3),

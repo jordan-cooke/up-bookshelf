@@ -188,7 +188,11 @@ async function scanBarcodePhoto(file) {
     await scanner.clear().catch(() => {});
     scanner = null;
     elements.lookupProgress.hidden = true;
-    await lookupIsbn(decodedText);
+    const accepted = await lookupIsbn(decodedText);
+    if (!accepted && elements.scannerDialog.open) {
+      elements.scanActions.hidden = false;
+      elements.scannerShell.hidden = true;
+    }
   } catch {
     await scanner?.clear().catch(() => {});
     scanner = null;
@@ -204,7 +208,11 @@ async function lookupIsbn(rawValue) {
   const isbn = String(rawValue || "").toUpperCase().replace(/[^0-9X]/g, "");
   if (![10, 13].includes(isbn.length)) {
     toast("That doesn’t look like a 10- or 13-digit ISBN.", "error");
-    return;
+    return false;
+  }
+  if (isbn.length === 13 && !/^(978|979)/.test(isbn)) {
+    toast("That is a product barcode, not a book ISBN. Scan the barcode beginning with 978 or 979.", "error");
+    return false;
   }
 
   scanLocked = true;
@@ -218,6 +226,7 @@ async function lookupIsbn(rawValue) {
     } else {
       openBookForm({ ...result.book, readingStatus: "unread" });
     }
+    return true;
   } catch (error) {
     scanLocked = false;
     elements.lookupProgress.hidden = true;
@@ -225,8 +234,10 @@ async function lookupIsbn(rawValue) {
       closeScanner();
       openBookForm({ isbn13: isbn.length === 13 ? isbn : "", isbn10: isbn.length === 10 ? isbn : "", readingStatus: "unread" });
       toast("We couldn’t find the details, but you can add them manually.", "info");
+      return true;
     } else {
       toast(error.message, "error");
+      return false;
     }
   }
 }

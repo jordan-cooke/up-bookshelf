@@ -7,7 +7,7 @@
     <meta name="description" content="A private, self-hosted home library." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=1.2.1" />
+    <link rel="stylesheet" href="/styles.css?v=1.3.0" />
     <title>JnC Bookshelf</title>
   </head>
   <body>
@@ -104,7 +104,7 @@
         <div><p class="eyebrow">Quick add</p><h2>Scan the ISBN barcode</h2></div>
         <button class="close-button" type="button" data-close="scanner-dialog" aria-label="Close scanner">×</button>
       </div>
-      <p class="modal-intro">Find the ISBN barcode on the back cover. Take a clear photo and we’ll fill in the book details for you.</p>
+      <p class="modal-intro">Find the ISBN barcode on the back cover—it begins with <strong>978</strong> or <strong>979</strong>. Avoid retailer stickers and other product barcodes. Take a clear photo and we’ll fill in the title, author, cover, and other details.</p>
       <div class="scan-actions" id="scan-actions">
         <button class="photo-scan-button" id="photo-scan-button" type="button">
           <span class="camera-disc" aria-hidden="true">
@@ -175,6 +175,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
-    <script type="module" src="/app.js?v=1.2.1"></script>
+    <script type="module" src="/app.js?v=1.3.0"></script>
   </body>
 </html>
