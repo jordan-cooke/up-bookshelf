@@ -19,7 +19,7 @@ function cleanList(value, maxItems = 20) {
   return [...new Set(list.map((item) => cleanText(item, 200)).filter(Boolean))].slice(0, maxItems);
 }
 
-function cleanUrl(value) {
+export function validateCoverUrl(value) {
   const candidate = cleanText(value, 2000);
   if (!candidate) return null;
   if (/^\/api\/covers\/(?:(?:97[89]\d{10}|\d{9}[\dX])|custom-[a-f0-9-]{36})\.(?:jpg|png|webp|avif)$/i.test(candidate)) return candidate;
@@ -77,7 +77,7 @@ export function validateBook(input = {}) {
     description: cleanText(input.description, 20000),
     pageCount,
     categories: cleanList(input.categories),
-    coverUrl: cleanUrl(input.coverUrl),
+    coverUrl: validateCoverUrl(input.coverUrl),
     language: cleanText(input.language, 30),
     readingStatus,
     rating: ratingValue,

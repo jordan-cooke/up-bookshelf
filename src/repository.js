@@ -212,6 +212,13 @@ export function updateBook(database, id, book) {
   return result.changes ? getBook(database, id) : null;
 }
 
+export function updateBookCover(database, id, coverUrl, metadataSource = "Custom cover upload") {
+  const result = database.prepare(`
+    UPDATE books SET cover_url = ?, metadata_source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(coverUrl, metadataSource, id);
+  return result.changes ? getBook(database, id) : null;
+}
+
 export function deleteBook(database, id) {
   return database.prepare("DELETE FROM books WHERE id = ?").run(id).changes > 0;
 }

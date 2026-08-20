@@ -43,6 +43,9 @@ const elements = {
   compareMetadata: document.querySelector("#compare-metadata"),
   metadataDialog: document.querySelector("#metadata-dialog"),
   providerStatuses: document.querySelector("#provider-statuses"),
+  metadataSearchForm: document.querySelector("#metadata-search-form"),
+  metadataSearchButton: document.querySelector("#metadata-search-button"),
+  metadataResults: document.querySelector("#metadata-results"),
   metadataChoices: document.querySelector("#metadata-choices"),
   applyMetadata: document.querySelector("#apply-metadata"),
   toastRegion: document.querySelector("#toast-region"),
@@ -68,6 +71,8 @@ let torchEnabled = false;
 let activeProviders = [];
 let metadataCatalog = {};
 let coverCatalog = [];
+let metadataResults = [];
+let selectedMetadataResult = -1;
 let appConfig = { brandName: "UP", appName: "UP Bookshelf", customName: "", tagline: "Every good story,\nright where you left it." };
 
 function escapeHtml(value = "") {
@@ -138,6 +143,7 @@ function applyAppConfig(config) {
   elements.brandLink.setAttribute("aria-label", `${config.appName} home`);
   document.title = config.appName;
   renderTagline(config.tagline);
+  document.body.classList.toggle("tagline-hidden", !config.tagline);
 }
 
 async function loadConfig() {
@@ -155,13 +161,15 @@ function openSettings() {
   elements.settingsForm.elements.tagline.value = appConfig.taglineText || appConfig.tagline || "";
   elements.settingsForm.elements.taglineEnabled.checked = appConfig.taglineEnabled !== false;
   elements.settingsForm.elements.googleBooksApiKey.value = "";
+  elements.settingsForm.elements.amazonCookie.value = "";
   elements.settingsForm.elements.amazonClientId.value = "";
   elements.settingsForm.elements.amazonClientSecret.value = "";
   elements.settingsForm.elements.amazonAssociateTag.value = "";
   elements.settingsForm.elements.amazonCredentialVersion.value = appConfig.providers?.amazon?.credentialVersion || "3.1";
   elements.settingsForm.elements.amazonMarketplace.value = appConfig.providers?.amazon?.marketplace || "www.amazon.com";
   elements.settingsForm.elements.removeGoogleBooksApiKey.checked = false;
-  elements.settingsForm.elements.removeAmazonCredentials.checked = false;
+  elements.settingsForm.elements.removeAmazonCookie.checked = false;
+  elements.settingsForm.elements.removeAmazonCreatorsCredentials.checked = false;
   elements.settingsForm.elements.googleBooksApiKey.placeholder = appConfig.providers?.google?.configured
     ? "Saved — leave blank to keep"
     : "Paste a Google Books API key";
@@ -169,6 +177,9 @@ function openSettings() {
   elements.settingsForm.elements.amazonClientId.placeholder = amazonSaved.clientId ? "Saved — leave blank to keep" : "Creator API client ID";
   elements.settingsForm.elements.amazonClientSecret.placeholder = amazonSaved.clientSecret ? "Saved — leave blank to keep" : "Creator API client secret";
   elements.settingsForm.elements.amazonAssociateTag.placeholder = amazonSaved.associateTag ? "Saved — leave blank to keep" : "your-tag-20";
+  elements.settingsForm.elements.amazonCookie.placeholder = appConfig.providers?.amazonCookie?.configured
+    ? "Saved — leave blank to keep"
+    : "session-id=…; ubid-main=…; …";
   document.querySelector("#google-settings-status").textContent = appConfig.providers?.google?.configured ? "Configured" : "Not configured";
   const anyAmazonSaved = Object.values(amazonSaved).some(Boolean);
   document.querySelector("#amazon-settings-status").textContent = appConfig.providers?.amazon?.configured
@@ -176,6 +187,8 @@ function openSettings() {
     : (anyAmazonSaved ? "Setup incomplete" : "Not configured");
   document.querySelector("#remove-google-row").hidden = !appConfig.providers?.google?.configured;
   document.querySelector("#remove-amazon-row").hidden = !anyAmazonSaved;
+  document.querySelector("#amazon-cookie-settings-status").textContent = appConfig.providers?.amazonCookie?.configured ? "Configured" : "Not configured";
+  document.querySelector("#remove-amazon-cookie-row").hidden = !appConfig.providers?.amazonCookie?.configured;
   syncTaglineControl();
   elements.settingsDialog.showModal();
   setTimeout(() => elements.settingsForm.elements.name.focus(), 50);
@@ -199,12 +212,14 @@ async function saveSettings(event) {
       taglineEnabled: fields.taglineEnabled.checked,
       googleBooksApiKey: fields.googleBooksApiKey.value,
       removeGoogleBooksApiKey: fields.removeGoogleBooksApiKey.checked,
+      amazonCookie: fields.amazonCookie.value,
+      removeAmazonCookie: fields.removeAmazonCookie.checked,
       amazonClientId: fields.amazonClientId.value,
       amazonClientSecret: fields.amazonClientSecret.value,
       amazonAssociateTag: fields.amazonAssociateTag.value,
       amazonCredentialVersion: fields.amazonCredentialVersion.value,
       amazonMarketplace: fields.amazonMarketplace.value,
-      removeAmazonCredentials: fields.removeAmazonCredentials.checked,
+      removeAmazonCreatorsCredentials: fields.removeAmazonCreatorsCredentials.checked,
     };
     applyAppConfig(await api("/api/settings", { method: "PUT", body: JSON.stringify(values) }));
     elements.settingsDialog.close();
@@ -593,7 +608,19 @@ async function uploadCustomCover(file) {
     setFormValue("coverUrl", result.coverUrl);
     setFormValue("metadataSource", "Custom cover upload");
     updateCoverPreview();
-    toast("Your cover was uploaded and selected.");
+    const bookId = elements.bookForm.elements.id.value;
+    if (bookId) {
+      const book = await api(`/api/books/${bookId}/cover`, {
+        method: "PATCH",
+        body: JSON.stringify({ coverUrl: result.coverUrl }),
+      });
+      setFormValue("coverUrl", book.coverUrl);
+      setFormValue("metadataSource", book.metadataSource);
+      await loadBooks();
+      toast("Your custom cover was uploaded and saved.");
+    } else {
+      toast("Cover selected. Add the book to save it to your shelf.", "info");
+    }
   } catch (error) {
     toast(error.message, "error");
   } finally {
@@ -661,30 +688,89 @@ function currentFieldValue(field) {
   return elements.bookForm.elements.namedItem(field)?.value?.trim() || "";
 }
 
-function buildChoiceCatalog(field) {
+function renderProviderStatuses() {
+  elements.providerStatuses.innerHTML = activeProviders.map((provider) => {
+    const count = Number(provider.count || (provider.available ? 1 : 0));
+    const status = count
+      ? `${count} matching ${count === 1 ? "edition" : "editions"}`
+      : (provider.configured ? (provider.error || "No matches") : "Not configured in settings");
+    return `<div class="provider-status provider-${escapeHtml(provider.id)} ${provider.available ? "is-available" : ""}">
+      <span><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(status)}</small></span>
+      <b>${count || "—"}</b>
+    </div>`;
+  }).join("");
+}
+
+function resultIsbn(book) {
+  return book.isbn13 || book.isbn10 || "No ISBN";
+}
+
+function renderMetadataResults() {
+  if (!metadataResults.length) {
+    elements.metadataResults.innerHTML = `<div class="metadata-empty"><strong>No matching editions found</strong><span>Try clearing the ISBN and searching by title and author.</span></div>`;
+    elements.metadataChoices.replaceChildren();
+    elements.applyMetadata.disabled = true;
+    return;
+  }
+  elements.metadataResults.innerHTML = `<section class="result-section"><div class="choice-heading"><span class="eyebrow">Search results</span><h3>${metadataResults.length} ${metadataResults.length === 1 ? "edition" : "editions"} found</h3></div><div class="metadata-result-grid">${metadataResults.map((result, index) => {
+    const book = result.book;
+    const cover = book.coverUrl
+      ? `<img src="${escapeHtml(book.coverUrl)}" alt="Cover of ${escapeHtml(book.title)}" loading="lazy" />`
+      : `<span class="result-cover-empty">No cover</span>`;
+    const description = book.description ? `<p>${escapeHtml(book.description)}</p>` : "";
+    const providerLink = /^https:\/\//i.test(book.providerUrl || "")
+      ? `<a class="text-button metadata-provider-link" href="${escapeHtml(book.providerUrl)}" target="_blank" rel="noopener noreferrer">View source</a>`
+      : "";
+    return `<article class="metadata-result-card ${index === selectedMetadataResult ? "is-selected" : ""}">
+      <button class="metadata-result-main" type="button" data-metadata-result="${index}" aria-label="Compare ${escapeHtml(book.title)} from ${escapeHtml(result.providerName)}">
+        <span class="metadata-result-cover">${cover}</span>
+        <span class="metadata-result-copy"><small>${escapeHtml(result.providerName)}</small><strong>${escapeHtml(book.title)}</strong><span>${escapeHtml((book.authors || []).join(", ") || "Unknown author")}</span><span>${escapeHtml(resultIsbn(book))}${book.publishedDate ? ` · ${escapeHtml(book.publishedDate)}` : ""}</span>${description}</span>
+      </button>
+      <div class="metadata-result-actions"><button class="text-button metadata-use-result" type="button" data-use-result="${index}">Use this edition</button>${providerLink}</div>
+    </article>`;
+  }).join("")}</div></section>`;
+}
+
+function makeMetadataChoices(field, candidate) {
   const choices = [];
-  const add = (provider, value) => {
+  const add = (provider, value, extras = {}) => {
     const text = valueText(value).trim();
     if (!text || choices.some((choice) => choice.value === text)) return;
-    choices.push({ provider, value: text });
+    choices.push({ provider, value: text, ...extras });
   };
-  add("Current", currentFieldValue(field));
-  for (const provider of activeProviders.filter((item) => item.available)) add(provider.name, provider.book?.[field]);
+  add("Current", currentFieldValue(field), field === "bookRating" ? {
+    ratingsCount: currentFieldValue("bookRatingsCount"),
+    source: currentFieldValue("bookRatingSource") || "Current",
+  } : {});
+  add(candidate.providerName, candidate.book?.[field], field === "bookRating" ? {
+    ratingsCount: candidate.book?.bookRatingsCount ?? "",
+    source: candidate.book?.bookRatingSource || candidate.providerName,
+  } : {});
   return choices;
 }
 
-function renderMetadataChoices() {
-  const availableProviders = activeProviders.filter((provider) => provider.available);
-  elements.providerStatuses.innerHTML = activeProviders.map((provider) => {
-    const status = provider.available ? "Choices found" : (provider.configured ? "No match returned" : "Not configured in settings");
-    const providerLink = provider.book?.providerUrl
-      ? `<a class="text-button" href="${escapeHtml(provider.book.providerUrl)}" target="_blank" rel="noreferrer">View</a>`
-      : "";
-    return `<div class="provider-status provider-${escapeHtml(provider.id)} ${provider.available ? "is-available" : ""}">
-      <span><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(status)}</small></span>
-      <div class="provider-actions">${providerLink}${provider.available ? `<button class="text-button" type="button" data-use-provider="${escapeHtml(provider.id)}">Use all</button>` : ""}</div>
-    </div>`;
-  }).join("");
+function choiceDisplay(field, choice) {
+  if (field !== "bookRating") return choice.value;
+  const count = Number(choice.ratingsCount);
+  return `${Number(choice.value).toFixed(1)} / 5${Number.isInteger(count) && count > 0 ? ` · ${count.toLocaleString()} ratings` : ""}`;
+}
+
+function renderComparisonField(field, label, choices, preferCandidate) {
+  if (!choices.length) return "";
+  const candidateIndex = choices.findIndex((choice) => choice.provider !== "Current");
+  const selectedIndex = preferCandidate && candidateIndex >= 0 ? candidateIndex : 0;
+  return `<div class="comparison-row"><span class="comparison-label">${escapeHtml(label)}</span><div class="comparison-values">${choices.map((choice, index) => `
+    <label class="comparison-value"><input type="radio" name="metadata-field-${escapeHtml(field)}" data-metadata-field="${escapeHtml(field)}" value="${index}" ${index === selectedIndex ? "checked" : ""} /><span><small>${escapeHtml(choice.provider)}</small><strong>${escapeHtml(choiceDisplay(field, choice))}</strong></span></label>
+  `).join("")}</div></div>`;
+}
+
+function renderMetadataChoices(preferCandidate = false) {
+  const candidate = metadataResults[selectedMetadataResult];
+  if (!candidate) {
+    elements.metadataChoices.replaceChildren();
+    elements.applyMetadata.disabled = true;
+    return;
+  }
 
   coverCatalog = [];
   const addCover = (provider, url, providerId = "", providerIndex = 0) => {
@@ -697,90 +783,84 @@ function renderMetadataChoices() {
     coverCatalog.push({ provider, providerId, providerIndex, url });
   };
   addCover("Current", currentFieldValue("coverUrl"));
-  for (const provider of availableProviders) {
-    const covers = provider.book?.coverCandidates?.length ? provider.book.coverCandidates : [provider.book?.coverUrl];
-    covers.forEach((url, index) => addCover(provider.name, url, provider.id, index));
+  for (const result of metadataResults) {
+    const covers = result.book?.coverCandidates?.length ? result.book.coverCandidates : [result.book?.coverUrl];
+    covers.forEach((url, index) => addCover(result.providerName, url, result.providerId, index));
   }
 
-  metadataCatalog = Object.fromEntries(METADATA_FIELDS.map(([field]) => [field, buildChoiceCatalog(field)]));
-  metadataCatalog.description = buildChoiceCatalog("description");
-  metadataCatalog.bookRating = [];
-  const addRating = (provider, value, ratingsCount, source) => {
-    const rating = Number(value);
-    if (!Number.isFinite(rating) || metadataCatalog.bookRating.some((choice) => choice.provider === provider && choice.value === rating)) return;
-    metadataCatalog.bookRating.push({ provider, value: rating, ratingsCount: ratingsCount ?? "", source: source || provider });
-  };
-  addRating("Current", currentFieldValue("bookRating"), currentFieldValue("bookRatingsCount"), currentFieldValue("bookRatingSource"));
-  for (const provider of availableProviders) {
-    addRating(provider.name, provider.book?.bookRating, provider.book?.bookRatingsCount, provider.book?.bookRatingSource);
-  }
+  metadataCatalog = Object.fromEntries([...METADATA_FIELDS, ["description", "Description"], ["bookRating", "Book rating"]]
+    .map(([field]) => [field, makeMetadataChoices(field, candidate)]));
+  const preferredCoverIndex = preferCandidate
+    ? coverCatalog.findIndex((cover) => cover.providerId === candidate.providerId
+      && (candidate.book.coverCandidates?.includes(cover.url) || candidate.book.coverUrl === cover.url))
+    : 0;
   const coverHtml = coverCatalog.length
-    ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Cover</span><h3>Pick the straightest, clearest cover</h3></div><div class="cover-choice-grid">${coverCatalog.map((cover, index) => `
-        <label class="cover-choice"><input type="radio" name="metadata-cover" value="${index}" data-provider="${escapeHtml(cover.provider)}" ${index === 0 ? "checked" : ""} /><span><img src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.provider)} cover option" loading="lazy" /><small>${escapeHtml(cover.provider)}</small></span></label>
+    ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">All available covers</span><h3>Choose the artwork you want on your shelf</h3></div><div class="cover-choice-grid">${coverCatalog.map((cover, index) => `
+        <label class="cover-choice"><input type="radio" name="metadata-cover" value="${index}" data-provider="${escapeHtml(cover.provider)}" ${index === Math.max(0, preferredCoverIndex) ? "checked" : ""} /><span><img src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.provider)} cover option" loading="lazy" /><small>${escapeHtml(cover.provider)}</small></span></label>
       `).join("")}</div></section>`
     : `<section class="choice-section"><p class="choice-empty">No provider returned a cover for this edition.</p></section>`;
 
-  let fieldHtml = METADATA_FIELDS.map(([field, label]) => {
-    const choices = metadataCatalog[field];
-    if (!choices.length) return "";
-    return `<label class="metadata-field"><span>${escapeHtml(label)}</span><select data-metadata-field="${field}">${choices.map((choice, index) => `<option value="${index}" data-provider="${escapeHtml(choice.provider)}">${escapeHtml(choice.value)} — ${escapeHtml(choice.provider)}</option>`).join("")}</select></label>`;
-  }).join("");
-  if (metadataCatalog.bookRating.length) {
-    fieldHtml += `<label class="metadata-field"><span>Book rating</span><select data-metadata-field="bookRating">${metadataCatalog.bookRating.map((choice, index) => {
-      const count = Number(choice.ratingsCount);
-      const countText = Number.isInteger(count) && count > 0 ? ` (${count.toLocaleString()} ratings)` : "";
-      return `<option value="${index}" data-provider="${escapeHtml(choice.provider)}">${choice.value.toFixed(1)} / 5${countText} — ${escapeHtml(choice.source)}</option>`;
-    }).join("")}</select></label>`;
+  const comparisonHtml = [...METADATA_FIELDS, ["bookRating", "Book rating"], ["description", "Description"]]
+    .map(([field, label]) => renderComparisonField(field, label, metadataCatalog[field], preferCandidate || !currentFieldValue(field))).join("");
+  elements.metadataChoices.innerHTML = `<section class="choice-section comparison-section"><div class="choice-heading comparison-heading"><div><span class="eyebrow">Side-by-side comparison</span><h3>Current book vs. ${escapeHtml(candidate.providerName)} edition</h3></div><button class="button button-secondary" type="button" data-use-result="${selectedMetadataResult}">Choose all from this edition</button></div><div class="comparison-table">${comparisonHtml}</div></section>${coverHtml}`;
+  elements.applyMetadata.disabled = false;
+}
+
+function selectMetadataResult(index, preferCandidate = false) {
+  if (!metadataResults[index]) return;
+  selectedMetadataResult = index;
+  renderMetadataResults();
+  renderMetadataChoices(preferCandidate);
+  elements.metadataChoices.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function searchMetadataCandidates(event) {
+  event?.preventDefault();
+  const values = Object.fromEntries(new FormData(elements.metadataSearchForm));
+  const parameters = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) if (String(value).trim()) parameters.set(key, String(value).trim());
+  elements.metadataSearchButton.disabled = true;
+  elements.metadataSearchButton.textContent = "Searching…";
+  elements.metadataResults.innerHTML = `<div class="metadata-empty"><span class="spinner" aria-hidden="true"></span><strong>Searching book providers…</strong></div>`;
+  elements.metadataChoices.replaceChildren();
+  try {
+    const result = await api(`/api/metadata-search?${parameters}`);
+    activeProviders = result.providers || [];
+    metadataResults = result.results || [];
+    selectedMetadataResult = metadataResults.length ? 0 : -1;
+    updateProviderToolbar();
+    renderProviderStatuses();
+    renderMetadataResults();
+    renderMetadataChoices(false);
+  } catch (error) {
+    toast(error.message, "error");
+    elements.metadataResults.innerHTML = `<div class="metadata-empty"><strong>Provider search failed</strong><span>${escapeHtml(error.message)}</span></div>`;
+  } finally {
+    elements.metadataSearchButton.disabled = false;
+    elements.metadataSearchButton.textContent = "Search";
   }
-
-  const descriptions = metadataCatalog.description;
-  const descriptionHtml = descriptions.length ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Description</span><h3>Pick the synopsis you prefer</h3></div><div class="description-choices">${descriptions.map((choice, index) => `
-    <label class="description-choice"><input type="radio" name="metadata-description" value="${index}" data-provider="${escapeHtml(choice.provider)}" ${index === 0 ? "checked" : ""} /><span><strong>${escapeHtml(choice.provider)}</strong><small>${escapeHtml(choice.value)}</small></span></label>
-  `).join("")}</div></section>` : "";
-
-  elements.metadataChoices.innerHTML = `${coverHtml}<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Book details</span><h3>Choose each field</h3></div><div class="metadata-field-grid">${fieldHtml}</div></section>${descriptionHtml}`;
 }
 
 async function openMetadataComparison() {
-  const isbn = (elements.bookForm.elements.isbn13.value || elements.bookForm.elements.isbn10.value).trim();
-  if (!isbn) {
-    toast("Add an ISBN before checking providers.", "info");
-    return;
-  }
-  elements.compareMetadata.disabled = true;
-  elements.compareMetadata.textContent = "Checking providers…";
-  try {
-    const result = await api(`/api/metadata/${encodeURIComponent(isbn)}`);
-    activeProviders = result.providers || [];
-    updateProviderToolbar();
-    renderMetadataChoices();
-    elements.metadataDialog.showModal();
-  } catch (error) {
-    toast(error.message, "error");
-  } finally {
-    elements.compareMetadata.disabled = false;
-    elements.compareMetadata.textContent = activeProviders.some((provider) => provider.available) ? "Compare providers" : "Find provider options";
-  }
-}
-
-function useAllFromProvider(providerId) {
-  const provider = activeProviders.find((item) => item.id === providerId);
-  if (!provider?.available) return;
-  elements.metadataChoices.querySelectorAll("select[data-metadata-field]").forEach((select) => {
-    const option = [...select.options].find((item) => item.dataset.provider === provider.name);
-    if (option) select.value = option.value;
-  });
-  for (const name of ["metadata-cover", "metadata-description"]) {
-    const input = elements.metadataChoices.querySelector(`input[name="${name}"][data-provider="${CSS.escape(provider.name)}"]`);
-    if (input) input.checked = true;
-  }
+  const fields = elements.metadataSearchForm.elements;
+  fields.isbn.value = (elements.bookForm.elements.isbn13.value || elements.bookForm.elements.isbn10.value).trim();
+  fields.title.value = currentFieldValue("title");
+  fields.author.value = currentFieldValue("authors").split(",")[0]?.trim() || "";
+  metadataResults = [];
+  selectedMetadataResult = -1;
+  elements.providerStatuses.replaceChildren();
+  elements.metadataResults.replaceChildren();
+  elements.metadataChoices.replaceChildren();
+  elements.applyMetadata.disabled = true;
+  elements.metadataDialog.showModal();
+  await searchMetadataCandidates();
 }
 
 function applyMetadataChoices() {
   const sources = [];
-  elements.metadataChoices.querySelectorAll("select[data-metadata-field]").forEach((select) => {
-    const field = select.dataset.metadataField;
-    const choice = metadataCatalog[field]?.[Number(select.value)];
+  elements.metadataChoices.querySelectorAll("input[data-metadata-field]:checked").forEach((input) => {
+    const field = input.dataset.metadataField;
+    const choice = metadataCatalog[field]?.[Number(input.value)];
     if (!choice) return;
     setFormValue(field, choice.value);
     if (field === "bookRating") {
@@ -794,14 +874,6 @@ function applyMetadataChoices() {
     const choice = coverCatalog[Number(coverInput.value)];
     if (choice) {
       setFormValue("coverUrl", choice.url);
-      sources.push(choice.provider);
-    }
-  }
-  const descriptionInput = elements.metadataChoices.querySelector('input[name="metadata-description"]:checked');
-  if (descriptionInput) {
-    const choice = metadataCatalog.description?.[Number(descriptionInput.value)];
-    if (choice) {
-      setFormValue("description", choice.value);
       sources.push(choice.provider);
     }
   }
@@ -820,7 +892,8 @@ function formBookData() {
 }
 
 function isKnownProviderCover(url) {
-  return activeProviders.some((provider) => provider.book?.coverCandidates?.includes(url) || provider.book?.coverUrl === url);
+  return metadataResults.some((result) => result.book?.coverCandidates?.includes(url) || result.book?.coverUrl === url)
+    || activeProviders.some((provider) => provider.book?.coverCandidates?.includes(url) || provider.book?.coverUrl === url);
 }
 
 async function saveBook(event) {
@@ -895,8 +968,12 @@ document.addEventListener("click", (event) => {
     if (action === "edit") editBook(id);
     if (action === "reload") loadBooks();
   }
-  const providerButton = event.target.closest("[data-use-provider]");
-  if (providerButton) useAllFromProvider(providerButton.dataset.useProvider);
+  const useResultButton = event.target.closest("[data-use-result]");
+  if (useResultButton) selectMetadataResult(Number(useResultButton.dataset.useResult), true);
+  else {
+    const resultButton = event.target.closest("[data-metadata-result]");
+    if (resultButton) selectMetadataResult(Number(resultButton.dataset.metadataResult), false);
+  }
   const closeElement = event.target.closest("[data-close]");
   if (closeElement) {
     if (closeElement.dataset.close === "scanner-dialog") closeScanner();
@@ -921,6 +998,7 @@ elements.bookForm.addEventListener("submit", saveBook);
 elements.deleteBook.addEventListener("click", removeBook);
 elements.compareMetadata.addEventListener("click", openMetadataComparison);
 elements.coverOptionsButton.addEventListener("click", openMetadataComparison);
+elements.metadataSearchForm.addEventListener("submit", searchMetadataCandidates);
 elements.uploadCoverButton.addEventListener("click", () => elements.customCoverFile.click());
 elements.customCoverFile.addEventListener("change", () => uploadCustomCover(elements.customCoverFile.files?.[0]));
 elements.applyMetadata.addEventListener("click", applyMetadataChoices);

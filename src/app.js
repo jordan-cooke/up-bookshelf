@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import helmet from "helmet";
 import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
-import { lookupBookMetadata } from "./metadata.js";
+import { isSupportedAmazonMarketplace, lookupBookMetadata, searchBookMetadata } from "./metadata.js";
 import { cacheBookCover, coverCacheState, saveUploadedCover } from "./covers.js";
 import {
   createBook,
@@ -18,11 +18,12 @@ import {
   listBooks,
   saveAppSettings,
   updateBook,
+  updateBookCover,
 } from "./repository.js";
-import { validateBook, ValidationError } from "./validation.js";
+import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.1.0";
+export const APP_VERSION = "2.2.0";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
@@ -44,13 +45,11 @@ function normalizeLookupResult(result) {
   return { book: result, providers: [] };
 }
 
-const PROVIDER_SETTING_KEYS = [
-  "google_books_api_key",
+const AMAZON_CREATORS_SETTING_KEYS = [
   "amazon_client_id",
   "amazon_client_secret",
   "amazon_credential_version",
   "amazon_associate_tag",
-  "amazon_marketplace",
 ];
 
 function providerConfiguration(saved) {
@@ -70,6 +69,12 @@ function providerConfiguration(saved) {
       credentialVersion: saved.amazon_credential_version || "3.1",
       marketplace: saved.amazon_marketplace || "www.amazon.com",
     },
+    amazonCookie: {
+      name: "Amazon session cookie",
+      configured: Boolean(saved.amazon_cookie),
+      requiresKey: true,
+      marketplace: saved.amazon_marketplace || "www.amazon.com",
+    },
   };
 }
 
@@ -81,10 +86,11 @@ function providerLookupOptions(saved) {
     amazonCredentialVersion: saved.amazon_credential_version || "3.1",
     amazonPartnerTag: saved.amazon_associate_tag || "",
     amazonMarketplace: saved.amazon_marketplace || "www.amazon.com",
+    amazonCookie: saved.amazon_cookie || "",
   };
 }
 
-export function createApp({ database, lookup = lookupBookMetadata, trustProxy = false, coverDirectory = null }) {
+export function createApp({ database, lookup = lookupBookMetadata, searchMetadata = searchBookMetadata, trustProxy = false, coverDirectory = null }) {
   const app = express();
   const currentConfig = () => {
     const saved = getAppSettings(database);
@@ -104,6 +110,7 @@ export function createApp({ database, lookup = lookupBookMetadata, trustProxy = 
     };
   };
   const performLookup = (isbn) => lookup(isbn, providerLookupOptions(getAppSettings(database)));
+  const performSearch = (query) => searchMetadata(query, providerLookupOptions(getAppSettings(database)));
   if (trustProxy) app.set("trust proxy", 1);
 
   app.disable("x-powered-by");
@@ -160,7 +167,7 @@ export function createApp({ database, lookup = lookupBookMetadata, trustProxy = 
         if (googleKey) updates.google_books_api_key = googleKey;
       }
 
-      if (request.body?.removeAmazonCredentials) keysToDelete.push(...PROVIDER_SETTING_KEYS.filter((key) => key.startsWith("amazon_")));
+      if (request.body?.removeAmazonCreatorsCredentials || request.body?.removeAmazonCredentials) keysToDelete.push(...AMAZON_CREATORS_SETTING_KEYS);
       else {
         const amazonValues = {
           amazon_client_id: String(request.body?.amazonClientId || "").trim(),
@@ -172,11 +179,21 @@ export function createApp({ database, lookup = lookupBookMetadata, trustProxy = 
         }
         Object.assign(updates, Object.fromEntries(Object.entries(amazonValues).filter(([, value]) => value)));
         const credentialVersion = String(request.body?.amazonCredentialVersion || "3.1");
-        const marketplace = String(request.body?.amazonMarketplace || "www.amazon.com").trim().toLowerCase();
         if (!["3.1", "3.2", "3.3"].includes(credentialVersion)) return response.status(400).json({ error: "Choose a valid Amazon credential version." });
-        if (!/^[a-z0-9.-]{3,253}$/.test(marketplace)) return response.status(400).json({ error: "Enter a valid Amazon marketplace domain." });
         updates.amazon_credential_version = credentialVersion;
-        updates.amazon_marketplace = marketplace;
+      }
+
+      const marketplace = String(request.body?.amazonMarketplace || "www.amazon.com").trim().toLowerCase();
+      if (!isSupportedAmazonMarketplace(marketplace)) return response.status(400).json({ error: "Choose a supported Amazon marketplace." });
+      updates.amazon_marketplace = marketplace;
+
+      if (request.body?.removeAmazonCookie) keysToDelete.push("amazon_cookie");
+      else {
+        const amazonCookie = String(request.body?.amazonCookie || "").trim().replace(/^cookie:\s*/i, "");
+        if (amazonCookie.length > 32768) return response.status(400).json({ error: "The Amazon cookie header is too long." });
+        if (/[\r\n\u0000-\u001f\u007f]/.test(amazonCookie)) return response.status(400).json({ error: "The Amazon cookie header contains invalid characters." });
+        if (amazonCookie && !amazonCookie.includes("=")) return response.status(400).json({ error: "Paste the full Cookie request header from Amazon." });
+        if (amazonCookie) updates.amazon_cookie = amazonCookie;
       }
 
       if (keysToDelete.length) deleteAppSettings(database, keysToDelete);
@@ -232,6 +249,20 @@ export function createApp({ database, lookup = lookupBookMetadata, trustProxy = 
     }
   });
 
+  app.patch("/api/books/:id/cover", numericId, async (request, response, next) => {
+    try {
+      const coverUrl = validateCoverUrl(request.body?.coverUrl);
+      if (!coverUrl?.startsWith("/api/covers/custom-")) {
+        return response.status(400).json({ error: "Upload a custom Bookshelf cover before saving it." });
+      }
+      const book = updateBookCover(database, request.bookId, coverUrl);
+      if (!book) return response.status(404).json({ error: "Book not found." });
+      return response.json(book);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.delete("/api/books/:id", numericId, async (request, response, next) => {
     try {
       if (!(await deleteBook(database, request.bookId))) return response.status(404).json({ error: "Book not found." });
@@ -275,6 +306,21 @@ export function createApp({ database, lookup = lookupBookMetadata, trustProxy = 
     }
   });
 
+  app.get("/api/metadata-search", async (request, response, next) => {
+    try {
+      const isbn = cleanIsbn(request.query.isbn);
+      const title = String(request.query.title || "").trim().slice(0, 500);
+      const author = String(request.query.author || "").trim().slice(0, 300);
+      if (isbn && !isValidIsbn10(isbn) && !isValidIsbn13(isbn)) {
+        return response.status(400).json({ error: "Enter a valid ISBN or clear it to search by title and author." });
+      }
+      if (!isbn && !title && !author) return response.status(400).json({ error: "Enter an ISBN, title, or author to search providers." });
+      return response.json(await performSearch({ isbn, title, author }));
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post("/api/covers/cache", async (request, response, next) => {
     try {
       const isbn = cleanIsbn(request.body?.isbn);
@@ -312,7 +358,7 @@ export function createApp({ database, lookup = lookupBookMetadata, trustProxy = 
       if (!state) return response.status(404).send("Cover not found");
       if (state.provider === "amazon" && state.expired) {
         const metadata = normalizeLookupResult(await performLookup(state.isbn));
-        const amazon = metadata.providers.find((provider) => provider.id === "amazon" && provider.available)?.book;
+        const amazon = metadata.providers.find((provider) => provider.id.startsWith("amazon") && provider.available)?.book;
         const candidates = amazon?.coverCandidates || [];
         const candidate = candidates[state.choiceIndex] || candidates[0];
         if (!candidate) return response.status(503).send("Amazon cover refresh unavailable");

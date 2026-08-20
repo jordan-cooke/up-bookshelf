@@ -7,7 +7,7 @@
     <meta name="description" content="A private, self-hosted home library." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=2.1.0" />
+    <link rel="stylesheet" href="/styles.css?v=2.2.0" />
     <title>UP Bookshelf</title>
   </head>
   <body>
@@ -207,8 +207,15 @@
         <div><p class="eyebrow">Provider comparison</p><h2>Choose the best details</h2></div>
         <button class="close-button" type="button" data-close="metadata-dialog" aria-label="Close provider comparison">×</button>
       </div>
-      <p class="modal-intro">Mix and match the cover, description, and details you prefer. Providers without a configured key remain listed so setup is clear.</p>
+      <p class="modal-intro">Search by ISBN, title, or author. Compare matching editions, then mix and match the cover and details you prefer.</p>
+      <form class="metadata-search" id="metadata-search-form">
+        <div class="field"><label for="metadata-search-isbn">ISBN</label><input id="metadata-search-isbn" name="isbn" inputmode="numeric" placeholder="ISBN-10 or ISBN-13" /></div>
+        <div class="field"><label for="metadata-search-title">Title</label><input id="metadata-search-title" name="title" placeholder="Book title" /></div>
+        <div class="field"><label for="metadata-search-author">Author</label><input id="metadata-search-author" name="author" placeholder="Author name" /></div>
+        <button class="button button-primary" id="metadata-search-button" type="submit">Search</button>
+      </form>
       <div class="provider-statuses" id="provider-statuses"></div>
+      <div class="metadata-results" id="metadata-results"></div>
       <div class="metadata-choices" id="metadata-choices"></div>
       <div class="modal-actions">
         <span class="action-spacer"></span>
@@ -241,18 +248,32 @@
               <label class="remove-secret" id="remove-google-row" hidden><input name="removeGoogleBooksApiKey" type="checkbox" /> Remove the saved Google Books key</label>
             </div>
 
-            <details class="provider-setting-block">
-              <summary><span><strong>Amazon Creators API</strong><small>Optional provider for eligible Amazon Associates applications.</small></span><span class="settings-status" id="amazon-settings-status">Not configured</span></summary>
-              <div class="amazon-fields">
-                <div class="field"><label for="amazon-client-id">Client ID</label><input id="amazon-client-id" name="amazonClientId" type="password" autocomplete="new-password" spellcheck="false" placeholder="Creator API client ID" /></div>
-                <div class="field"><label for="amazon-client-secret">Client secret</label><input id="amazon-client-secret" name="amazonClientSecret" type="password" autocomplete="new-password" spellcheck="false" placeholder="Creator API client secret" /></div>
-                <div class="field"><label for="amazon-associate-tag">Associate tag</label><input id="amazon-associate-tag" name="amazonAssociateTag" spellcheck="false" placeholder="your-tag-20" /></div>
-                <div class="field"><label for="amazon-credential-version">Credential region</label><select id="amazon-credential-version" name="amazonCredentialVersion"><option value="3.1">North America (3.1)</option><option value="3.2">Europe (3.2)</option><option value="3.3">Far East (3.3)</option></select></div>
-                <div class="field field-wide"><label for="amazon-marketplace">Marketplace</label><input id="amazon-marketplace" name="amazonMarketplace" value="www.amazon.com" spellcheck="false" /></div>
-                <small class="secret-help">Leave credential fields blank to retain saved values. Amazon requires an approved Creators API application and the correct Associate tag for the chosen marketplace.</small>
-                <label class="remove-secret field-wide" id="remove-amazon-row" hidden><input name="removeAmazonCredentials" type="checkbox" /> Remove all saved Amazon credentials</label>
-              </div>
-            </details>
+            <div class="provider-setting-block amazon-provider-block">
+              <div class="provider-setting-heading"><div><strong>Amazon</strong><small>Optional. Choose the connection method that fits you.</small></div></div>
+              <div class="field"><label for="amazon-marketplace">Marketplace</label><select id="amazon-marketplace" name="amazonMarketplace"><option value="www.amazon.com">Amazon.com (United States)</option><option value="www.amazon.ca">Amazon.ca (Canada)</option><option value="www.amazon.com.mx">Amazon.com.mx (Mexico)</option><option value="www.amazon.com.br">Amazon.com.br (Brazil)</option><option value="www.amazon.co.uk">Amazon.co.uk (United Kingdom)</option><option value="www.amazon.com.au">Amazon.com.au (Australia)</option><option value="www.amazon.de">Amazon.de (Germany)</option><option value="www.amazon.fr">Amazon.fr (France)</option><option value="www.amazon.it">Amazon.it (Italy)</option><option value="www.amazon.es">Amazon.es (Spain)</option><option value="www.amazon.nl">Amazon.nl (Netherlands)</option><option value="www.amazon.se">Amazon.se (Sweden)</option><option value="www.amazon.pl">Amazon.pl (Poland)</option><option value="www.amazon.com.be">Amazon.com.be (Belgium)</option><option value="www.amazon.co.jp">Amazon.co.jp (Japan)</option><option value="www.amazon.in">Amazon.in (India)</option><option value="www.amazon.sg">Amazon.sg (Singapore)</option><option value="www.amazon.ae">Amazon.ae (UAE)</option><option value="www.amazon.sa">Amazon.sa (Saudi Arabia)</option><option value="www.amazon.com.tr">Amazon.com.tr (Türkiye)</option></select><small>The marketplace must match the site where the cookie or official account was created.</small></div>
+
+              <details class="amazon-method">
+                <summary><span><strong>Session cookie</strong><small>Quick setup and Grimmory-style search results.</small></span><span class="settings-status warning-status">Simpler · less secure</span><span class="settings-status" id="amazon-cookie-settings-status">Not configured</span></summary>
+                <div class="amazon-method-fields">
+                  <div class="security-note security-warning"><strong>Important security note</strong><span>This unofficial method acts as your signed-in Amazon browser session. Use a secondary Amazon account if possible, never share the cookie, and expect it to expire or trigger Amazon verification. It can stop working if Amazon changes its pages.</span></div>
+                  <div class="field"><label for="amazon-cookie">Full Cookie header value</label><input id="amazon-cookie" name="amazonCookie" type="password" autocomplete="new-password" spellcheck="false" placeholder="session-id=…; ubid-main=…; …" /><small>Paste the complete combined <strong>Cookie</strong> value from a signed-in Amazon request. Including the optional “Cookie:” prefix is okay. It is saved only in your SQLite database, never returned to the browser, and never included in exports.</small></div>
+                  <label class="remove-secret" id="remove-amazon-cookie-row" hidden><input name="removeAmazonCookie" type="checkbox" /> Remove the saved Amazon cookie</label>
+                </div>
+              </details>
+
+              <details class="amazon-method">
+                <summary><span><strong>Official Creators API</strong><small>For approved Amazon Associates/Creators API accounts.</small></span><span class="settings-status secure-status">More secure · stable</span><span class="settings-status" id="amazon-settings-status">Not configured</span></summary>
+                <div class="amazon-fields">
+                  <p class="secret-help"><strong>Why are there several fields?</strong> Amazon’s official API does not use one simple key. It requires an approved account, app credentials, and Associate tag. You can leave this section empty and use the cookie method above instead.</p>
+                  <div class="field"><label for="amazon-client-id">Client ID</label><input id="amazon-client-id" name="amazonClientId" type="password" autocomplete="new-password" spellcheck="false" placeholder="Creators API client ID" /></div>
+                  <div class="field"><label for="amazon-client-secret">Client secret</label><input id="amazon-client-secret" name="amazonClientSecret" type="password" autocomplete="new-password" spellcheck="false" placeholder="Creators API client secret" /></div>
+                  <div class="field"><label for="amazon-associate-tag">Associate tag</label><input id="amazon-associate-tag" name="amazonAssociateTag" spellcheck="false" placeholder="your-tag-20" /></div>
+                  <div class="field"><label for="amazon-credential-version">Credential region</label><select id="amazon-credential-version" name="amazonCredentialVersion"><option value="3.1">North America (3.1)</option><option value="3.2">Europe (3.2)</option><option value="3.3">Far East (3.3)</option></select></div>
+                  <small class="secret-help">Leave credential fields blank to retain saved values. The marketplace above must match the official account.</small>
+                  <label class="remove-secret field-wide" id="remove-amazon-row" hidden><input name="removeAmazonCreatorsCredentials" type="checkbox" /> Remove the saved Creators API credentials</label>
+                </div>
+              </details>
+            </div>
           </section>
         </div>
         <div class="form-error" id="settings-error" role="alert" hidden></div>
@@ -267,6 +288,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
-    <script type="module" src="/app.js?v=2.1.0"></script>
+    <script type="module" src="/app.js?v=2.2.0"></script>
   </body>
 </html>

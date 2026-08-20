@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeBookMetadata, normalizeAmazonBook, normalizeGoogleBook, normalizeOpenLibraryBook } from "../src/metadata.js";
+import {
+  mergeBookMetadata,
+  normalizeAmazonBook,
+  normalizeAmazonCookieSearchResults,
+  normalizeGoogleBook,
+  normalizeGoogleSearchResults,
+  normalizeOpenLibraryBook,
+  normalizeOpenLibrarySearchResults,
+} from "../src/metadata.js";
 
 test("normalizes Google Books metadata and upgrades cover URLs", () => {
   const result = normalizeGoogleBook(
@@ -131,4 +139,42 @@ test("merges providers so richer descriptions and cover choices are retained", (
   assert.equal(result.coverCandidates.length, 2);
   assert.equal(result.coverUrl, "https://covers.openlibrary.org/cover.jpg");
   assert.equal(result.metadataSource, "Google Books + Open Library");
+});
+
+test("normalizes multi-edition Google and Open Library search results", () => {
+  const google = normalizeGoogleSearchResults({ items: [{ volumeInfo: {
+    title: "Nero",
+    authors: ["S. J. Tilly"],
+    industryIdentifiers: [{ type: "ISBN_13", identifier: "9781399745413" }],
+    imageLinks: { large: "http://books.google.com/nero.jpg?edge=curl" },
+    description: "An edition description.",
+  } }] });
+  const openLibrary = normalizeOpenLibrarySearchResults({ docs: [{
+    key: "/works/OL1W",
+    title: "Nero",
+    author_name: ["S. J. Tilly"],
+    isbn: ["9781399745413"],
+    cover_i: 123,
+  }] });
+  assert.equal(google[0].coverUrl, "https://books.google.com/nero.jpg");
+  assert.equal(google[0].description, "An edition description.");
+  assert.equal(openLibrary[0].providerUrl, "https://openlibrary.org/works/OL1W");
+  assert.equal(openLibrary[0].coverUrl, "https://covers.openlibrary.org/b/id/123-L.jpg?default=false");
+});
+
+test("parses Amazon session-cookie search cards without exposing the cookie", () => {
+  const results = normalizeAmazonCookieSearchResults(`
+    <div data-component-type="s-search-result" data-asin="054792822X">
+      <h2><a href="/Hobbit/dp/054792822X"><span>The Hobbit</span></a></h2>
+      <div class="a-row a-size-base a-color-secondary">by J. R. R. Tolkien | September 18, 2012</div>
+      <img class="s-image" src="https://m.media-amazon.com/images/I/small.jpg"
+        srcset="https://m.media-amazon.com/images/I/small.jpg 1x, https://m.media-amazon.com/images/I/large.jpg 2x" />
+    </div>
+  `, "www.amazon.com");
+  assert.equal(results.length, 1);
+  assert.equal(results[0].title, "The Hobbit");
+  assert.deepEqual(results[0].authors, ["J. R. R. Tolkien"]);
+  assert.equal(results[0].isbn13, "9780547928227");
+  assert.equal(results[0].coverUrl, "https://m.media-amazon.com/images/I/large.jpg");
+  assert.equal(results[0].metadataSource, "Amazon (cookie)");
 });

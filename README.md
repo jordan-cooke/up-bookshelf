@@ -12,7 +12,7 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Offers a flashlight control when the selected camera and browser support it
 - Retries captured photos with an enhanced, high-contrast image
 - Rejects retail/product barcodes and the small five-digit price supplement
-- Looks up editions through Open Library, Google Books, and optionally Amazon Creators API
+- Looks up multiple editions through Open Library, Google Books, and either optional Amazon connection method
 - Shows every cover returned by the configured providers and lets the user upload a custom cover
 - Compares provider descriptions and individual fields before saving
 - Removes Google’s `edge=curl` cover treatment and caches the selected cover locally
@@ -59,7 +59,7 @@ Everything needed to run the application is in one Docker image: the Node server
 
 The SQLite library remains at `/mnt/user/appdata/up-bookshelf/data/bookshelf.sqlite` across rebuilds and container replacement.
 
-After deployment, the header gear opens **Bookshelf settings**. The name, motto visibility and text, Google Books key, and optional Amazon credentials are saved in SQLite under `/data`. They survive pulls, image rebuilds, and container replacement. Saved secret values are never returned to the browser; the settings page reports only whether each provider is configured.
+After deployment, the header gear opens **Bookshelf settings**. The name, motto visibility and text, Google Books key, and optional Amazon credentials are saved in SQLite under `/data`. They survive pulls, image rebuilds, and container replacement. Saved secret values are never returned by the settings API or included in library exports; the settings page reports only whether each provider is configured.
 
 ## Direct Docker deployment
 
@@ -80,15 +80,28 @@ docker run -d \
 
 The image always starts with generic defaults. Complete personalization and optional provider setup from the gear menu after opening the app.
 
-## Amazon provider
+## Optional Amazon provider
 
-The integration uses the current **Amazon Creators API**, not the retired Product Advertising API 5. Amazon access requires an accepted Amazon Associates account, approved Creators API access, an application credential, and an Associates partner tag. Amazon states that Creators API applications must be eligible under its license and direct sales to Amazon, so only enable this optional provider if Amazon has approved the way you intend to use it. Vended product links are preserved unchanged in the comparison screen.
+The settings page offers two independent Amazon methods. Neither is needed for normal use; Open Library is automatic and Google Books can be enabled with a single API key.
 
-Enter the Creators API client ID, client secret, credential region, Associate tag, and marketplace under **Bookshelf settings → Book information providers**.
+### Session cookie — simpler, less secure
 
-Credential version `3.1` is the North America token endpoint, `3.2` is Europe, and `3.3` is Far East. The marketplace and Associates tag must belong together. Amazon remains unavailable in the comparison screen until every required value is supplied.
+This Grimmory-style option searches the Amazon website with an existing signed-in browser session. It is easy to configure and often returns useful edition and cover alternatives, but it is unofficial, more fragile, and less secure than the API. Cookies expire, Amazon may request verification, and page changes can temporarily break parsing.
 
-Amazon-sourced covers are revalidated after one day to follow the Creators API resource-caching rules. The comparison screen also includes the provider's Amazon product link when one is returned. Open Library and Google Books continue to work without Amazon credentials.
+To configure it from a desktop browser:
+
+1. Preferably sign into a secondary Amazon account on the marketplace you use.
+2. Open the browser developer tools, choose **Network**, and load an Amazon book search.
+3. Select the main Amazon document request and copy the complete combined **Cookie** request-header value—not one individual cookie.
+4. In UP Bookshelf, open **Settings → Book information providers → Amazon → Session cookie**, choose the same marketplace, paste the value, and save.
+
+Treat this value like a password. It is stored server-side in the mounted SQLite database, never sent back to the browser, and never included in exports. Anyone with access to the appdata database may still be able to read it, so protect appdata backups and do not publish the database. The cookie method follows the same practical precautions documented by [Grimmory](https://grimmory.org/docs/metadata/amazon-cookie/).
+
+### Official Creators API — more secure and stable
+
+The official method uses Amazon’s current **Creators API**. It requires an accepted Amazon Associates account, approved API access, a client ID, client secret, and Associate tag. Enter those values under **Settings → Book information providers → Amazon → Official Creators API**. Credential version `3.1` is North America, `3.2` is Europe, and `3.3` is Far East; the marketplace and Associate tag must match.
+
+Both methods can be configured at once and appear as separate, clearly labeled sources in metadata search. Amazon-sourced covers are cached locally and revalidated after one day. Open Library and Google Books continue to work if either Amazon method is unavailable.
 
 ## HTTPS, camera selection, and flashlight
 
@@ -113,14 +126,15 @@ Do not expose port 3080 directly to the public internet. This application intent
 
 ## Provider comparison and cover repair
 
-Every book form has **Choose from providers** and **Upload your own cover** controls beside its cover. The provider comparison screen provides:
+Every book form has **Choose from providers** and **Upload your own cover** controls beside its cover. The provider comparison screen now searches ISBN, title, and author and provides:
 
-- Every distinct cover candidate returned by each provider
-- A provider-wide **Use all** shortcut
-- Per-field choices for title, author, publisher, date, pages, language, genres, and ISBN
-- Separate description choices
+- Edition cards for every match returned by each provider
+- Every distinct cover candidate from all matching editions
+- A side-by-side comparison of the current book and the selected provider edition
+- Per-field choices for title, author, publisher, date, pages, language, genres, ISBN, rating, and description
+- A **Choose all from this edition** shortcut plus a source link when the provider supplies one
 
-For a book already on the shelf, open the book and select **Choose from providers** or **Compare providers**. When a provider cover is selected and the book is saved, the server validates and downloads the image to `/data/covers`. A custom upload is resized in the browser, converted to JPEG, and stored in the same persistent directory. Amazon images are refreshed after the provider's one-day cache window; other provider and uploaded covers remain local until you choose a replacement.
+For a book already on the shelf, open the book and select **Choose from providers** or **Compare providers**. When a provider cover is selected and the book is saved, the server validates and downloads the image to `/data/covers`. A custom upload is resized in the browser, converted to JPEG, stored in the same persistent directory, and immediately attached to an existing book. Amazon images are refreshed after the provider's one-day cache window; other provider and uploaded covers remain local until you choose a replacement.
 
 ## Backups
 
@@ -160,7 +174,7 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.1.0 moves personalization and optional provider credentials into persistent website settings. Existing books, covers, and earlier saved name or motto settings are preserved automatically.
+Release 2.2.0 adds multi-edition metadata search and comparison, makes custom-cover uploads persist immediately on existing books, collapses the home hero when its motto is hidden, and adds both Amazon session-cookie and official Creators API options. Existing books, covers, settings, and secrets are preserved automatically.
 
 ## Local development
 
