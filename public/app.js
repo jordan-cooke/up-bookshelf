@@ -13,6 +13,7 @@ const elements = {
   settingsForm: document.querySelector("#settings-form"),
   settingsError: document.querySelector("#settings-error"),
   saveSettings: document.querySelector("#save-settings"),
+  testAmazonCookie: document.querySelector("#test-amazon-cookie"),
   themeToggle: document.querySelector("#theme-toggle"),
   scannerDialog: document.querySelector("#scanner-dialog"),
   scanActions: document.querySelector("#scan-actions"),
@@ -25,6 +26,7 @@ const elements = {
   photoScanButton: document.querySelector("#photo-scan-button"),
   barcodePhoto: document.querySelector("#barcode-photo"),
   liveScanButton: document.querySelector("#live-scan-button"),
+  continuousScan: document.querySelector("#continuous-scan"),
   isbnForm: document.querySelector("#isbn-form"),
   isbnInput: document.querySelector("#isbn-input"),
   lookupProgress: document.querySelector("#lookup-progress"),
@@ -73,6 +75,8 @@ let metadataCatalog = {};
 let coverCatalog = [];
 let metadataResults = [];
 let selectedMetadataResult = -1;
+let scannerInputMode = "";
+let pendingContinuousScanMode = "";
 let appConfig = { brandName: "UP", appName: "UP Bookshelf", customName: "", tagline: "Every good story,\nright where you left it." };
 
 function escapeHtml(value = "") {
@@ -189,6 +193,7 @@ function openSettings() {
   document.querySelector("#remove-amazon-row").hidden = !anyAmazonSaved;
   document.querySelector("#amazon-cookie-settings-status").textContent = appConfig.providers?.amazonCookie?.configured ? "Configured" : "Not configured";
   document.querySelector("#remove-amazon-cookie-row").hidden = !appConfig.providers?.amazonCookie?.configured;
+  document.querySelector("#amazon-cookie-saved-note").hidden = !appConfig.providers?.amazonCookie?.configured;
   syncTaglineControl();
   elements.settingsDialog.showModal();
   setTimeout(() => elements.settingsForm.elements.name.focus(), 50);
@@ -206,6 +211,7 @@ async function saveSettings(event) {
   elements.saveSettings.textContent = "Saving…";
   try {
     const fields = elements.settingsForm.elements;
+    const cookieWasEntered = Boolean(fields.amazonCookie.value.trim());
     const values = {
       name: fields.name.value,
       tagline: fields.tagline.value,
@@ -223,13 +229,29 @@ async function saveSettings(event) {
     };
     applyAppConfig(await api("/api/settings", { method: "PUT", body: JSON.stringify(values) }));
     elements.settingsDialog.close();
-    toast("Bookshelf settings saved.");
+    toast(cookieWasEntered ? "Amazon cookie saved. Reopen settings to test the connection." : "Bookshelf settings saved.");
   } catch (error) {
     elements.settingsError.textContent = error.message;
     elements.settingsError.hidden = false;
   } finally {
     elements.saveSettings.disabled = false;
     elements.saveSettings.textContent = "Save settings";
+  }
+}
+
+async function testSavedAmazonCookie() {
+  elements.testAmazonCookie.disabled = true;
+  elements.testAmazonCookie.textContent = "Testing…";
+  try {
+    const result = await api("/api/providers/amazon-cookie/test", { method: "POST" });
+    toast(`Amazon cookie works—${result.count || "book"} ${result.count === 1 ? "result" : "results"} returned.`);
+    document.querySelector("#amazon-cookie-settings-status").textContent = "Connected";
+  } catch (error) {
+    toast(error.message, "error");
+    document.querySelector("#amazon-cookie-settings-status").textContent = "Needs attention";
+  } finally {
+    elements.testAmazonCookie.disabled = false;
+    elements.testAmazonCookie.textContent = "Test saved cookie";
   }
 }
 
@@ -314,6 +336,7 @@ async function disposeScanner() {
 
 async function closeScanner() {
   scanLocked = false;
+  scannerInputMode = "";
   if (elements.scannerDialog.open) elements.scannerDialog.close();
   await disposeScanner();
   elements.scannerReader.replaceChildren();
@@ -329,6 +352,12 @@ function openScanner() {
   elements.lookupProgressLabel.textContent = "Looking up that book…";
   elements.liveScanButton.hidden = !window.isSecureContext;
   elements.scannerDialog.showModal();
+}
+
+function resumeContinuousScanning(mode) {
+  openScanner();
+  toast("Book added. Ready for the next one.", "info");
+  if (mode === "live" && window.isSecureContext) setTimeout(() => startLiveScanner(), 120);
 }
 
 function cameraScore(camera) {
@@ -362,10 +391,11 @@ async function startSelectedCamera(cameraId) {
     await scanner.start(
       cameraId,
       { fps: 15, qrbox: scanBox, aspectRatio: 1.777, disableFlip: true },
-      (decodedText) => lookupIsbn(decodedText),
+      (decodedText) => lookupIsbn(decodedText, "live"),
       () => {},
     );
     localStorage.setItem("up-bookshelf-camera", cameraId);
+    scannerInputMode = "live";
     let capabilities = {};
     try { capabilities = scanner.getRunningTrackCapabilities() || {}; } catch { /* Browser does not expose capabilities. */ }
     elements.torchButton.hidden = !capabilities.torch;
@@ -491,7 +521,7 @@ async function scanBarcodePhoto(file) {
     }
     if (!decodedText) throw new Error("No ISBN barcode was detected");
     elements.lookupProgress.hidden = true;
-    const accepted = await lookupIsbn(decodedText);
+    const accepted = await lookupIsbn(decodedText, "photo");
     if (!accepted && elements.scannerDialog.open) {
       elements.scanActions.hidden = false;
       elements.scannerShell.hidden = true;
@@ -505,7 +535,7 @@ async function scanBarcodePhoto(file) {
   }
 }
 
-async function lookupIsbn(rawValue) {
+async function lookupIsbn(rawValue, source = scannerInputMode || "manual") {
   if (scanLocked) return false;
   const isbn = String(rawValue || "").toUpperCase().replace(/[^0-9X]/g, "");
   if (![10, 13].includes(isbn.length)) {
@@ -518,15 +548,17 @@ async function lookupIsbn(rawValue) {
   }
 
   scanLocked = true;
+  const continueMode = elements.continuousScan.checked ? source : "";
   elements.lookupProgress.hidden = false;
   try {
     const result = await api(`/api/lookup/${encodeURIComponent(isbn)}`);
     await closeScanner();
     if (result.existing) {
       toast("That book is already on your shelf.", "info");
-      openBookForm(result.existing);
+      if (continueMode) resumeContinuousScanning(continueMode);
+      else openBookForm(result.existing);
     } else {
-      openBookForm({ ...result.book, readingStatus: "unread" }, result.providers || []);
+      openBookForm({ ...result.book, readingStatus: "unread" }, result.providers || [], continueMode);
     }
     return true;
   } catch (error) {
@@ -534,7 +566,11 @@ async function lookupIsbn(rawValue) {
     elements.lookupProgress.hidden = true;
     if (/No book metadata/.test(error.message)) {
       await closeScanner();
-      openBookForm({ isbn13: isbn.length === 13 ? isbn : "", isbn10: isbn.length === 10 ? isbn : "", readingStatus: "unread" });
+      openBookForm(
+        { isbn13: isbn.length === 13 ? isbn : "", isbn10: isbn.length === 10 ? isbn : "", readingStatus: "unread" },
+        [],
+        continueMode,
+      );
       toast("We couldn’t find the details, but you can add them manually.", "info");
       return true;
     }
@@ -640,7 +676,7 @@ function updateProviderToolbar() {
   elements.compareMetadata.textContent = available ? "Compare providers" : "Find provider options";
 }
 
-function openBookForm(book = {}, providers = []) {
+function openBookForm(book = {}, providers = [], continuousMode = "") {
   elements.bookForm.reset();
   elements.formError.hidden = true;
   activeProviders = providers;
@@ -668,6 +704,7 @@ function openBookForm(book = {}, providers = []) {
   };
   Object.entries(values).forEach(([name, value]) => setFormValue(name, value));
   const editing = Boolean(book.id);
+  pendingContinuousScanMode = editing ? "" : continuousMode;
   document.querySelector("#form-eyebrow").textContent = editing ? "On your shelf" : "New book";
   document.querySelector("#form-title").textContent = editing ? "Book details" : "Add to bookshelf";
   elements.saveBook.textContent = editing ? "Save changes" : "Add to shelf";
@@ -900,6 +937,7 @@ async function saveBook(event) {
   event.preventDefault();
   const data = formBookData();
   const editing = Boolean(data.id);
+  const continuousMode = editing ? "" : pendingContinuousScanMode;
   elements.formError.hidden = true;
   elements.saveBook.disabled = true;
   elements.saveBook.textContent = editing ? "Saving…" : "Adding…";
@@ -922,9 +960,11 @@ async function saveBook(event) {
       method: editing ? "PUT" : "POST",
       body: JSON.stringify(data),
     });
+    pendingContinuousScanMode = "";
     elements.bookDialog.close();
     toast(editing ? "Book details saved." : "Book added to your shelf.");
     await Promise.all([loadBooks(), loadStats()]);
+    if (continuousMode) resumeContinuousScanning(continuousMode);
   } catch (error) {
     elements.formError.textContent = error.message;
     elements.formError.hidden = false;
@@ -984,10 +1024,11 @@ document.addEventListener("click", (event) => {
 elements.themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 elements.settingsButton.addEventListener("click", openSettings);
 elements.settingsForm.addEventListener("submit", saveSettings);
+elements.testAmazonCookie.addEventListener("click", testSavedAmazonCookie);
 elements.settingsForm.elements.taglineEnabled.addEventListener("change", syncTaglineControl);
 elements.isbnForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  lookupIsbn(elements.isbnInput.value);
+  lookupIsbn(elements.isbnInput.value, "manual");
 });
 elements.photoScanButton.addEventListener("click", () => elements.barcodePhoto.click());
 elements.barcodePhoto.addEventListener("change", () => scanBarcodePhoto(elements.barcodePhoto.files?.[0]));
@@ -1001,6 +1042,10 @@ elements.coverOptionsButton.addEventListener("click", openMetadataComparison);
 elements.metadataSearchForm.addEventListener("submit", searchMetadataCandidates);
 elements.uploadCoverButton.addEventListener("click", () => elements.customCoverFile.click());
 elements.customCoverFile.addEventListener("change", () => uploadCustomCover(elements.customCoverFile.files?.[0]));
+elements.continuousScan.checked = localStorage.getItem("up-bookshelf-continuous-scan") === "1";
+elements.continuousScan.addEventListener("change", () => {
+  localStorage.setItem("up-bookshelf-continuous-scan", elements.continuousScan.checked ? "1" : "0");
+});
 elements.applyMetadata.addEventListener("click", applyMetadataChoices);
 elements.bookForm.elements.coverUrl.addEventListener("input", updateCoverPreview);
 elements.bookForm.elements.isbn13.addEventListener("input", updateProviderToolbar);
@@ -1023,6 +1068,7 @@ for (const dialog of [elements.bookDialog, elements.metadataDialog, elements.set
     if (event.target === dialog) dialog.close();
   });
 }
+elements.bookDialog.addEventListener("close", () => { pendingContinuousScanMode = ""; });
 
 initializeTheme();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});

@@ -269,6 +269,11 @@ dialog::backdrop { background: rgb(25 34 30 / 60%); backdrop-filter: blur(3px); 
 .manual-isbn > span::before, .manual-isbn > span::after { height: 1px; flex: 1; content: ""; background: var(--border); }
 .manual-isbn form { display: flex; gap: .65rem; }
 .manual-isbn input { min-width: 0; min-height: 46px; flex: 1; padding: .7rem .85rem; border: 1px solid var(--border); border-radius: 10px; }
+.continuous-scan-control { display: flex; margin: 0 1.6rem 1rem; padding: .8rem 1rem; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--paper); cursor: pointer; }
+.continuous-scan-control > span { display: flex; flex-direction: column; gap: .2rem; }
+.continuous-scan-control strong { font-size: .86rem; }
+.continuous-scan-control small { color: var(--muted); font-size: .74rem; line-height: 1.4; }
+.continuous-scan-control input { width: 42px; min-width: 42px; height: 22px; accent-color: var(--green); }
 
 .book-modal { width: min(930px, calc(100% - 2rem)); }
 .sticky-modal-header { position: sticky; z-index: 2; top: 0; padding-bottom: 1.1rem; border-bottom: 1px solid var(--border); background: rgb(255 253 248 / 94%); backdrop-filter: blur(12px); }
@@ -328,6 +333,11 @@ html[data-theme="dark"] .field input, html[data-theme="dark"] .field select, htm
 .security-note { display: flex; padding: .8rem .9rem; border-radius: 9px; flex-direction: column; gap: .25rem; font-size: .76rem; line-height: 1.45; }
 .security-note strong { font-size: .79rem; }
 .security-warning { border: 1px solid #e0b991; color: #68401f; background: #fff0df; }
+.saved-secret-note { display: flex; padding: .75rem .85rem; align-items: center; justify-content: space-between; gap: .8rem; border: 1px solid rgb(49 92 73 / 30%); border-radius: 9px; background: var(--green-soft); }
+.saved-secret-note > span { display: flex; flex-direction: column; gap: .2rem; }
+.saved-secret-note strong { font-size: .8rem; }
+.saved-secret-note small { color: var(--muted); font-size: .72rem; line-height: 1.4; }
+.saved-secret-note .button { min-height: 38px; flex: none; font-size: .72rem; }
 .secret-help { grid-column: 1 / -1; color: var(--muted); line-height: 1.5; }
 .remove-secret { display: flex; align-items: center; gap: .45rem; color: var(--danger); font-size: .75rem; font-weight: 700; }
 
@@ -460,6 +470,7 @@ html[data-theme="dark"] .skeleton { background: linear-gradient(90deg, #26342d 2
   .scanner-shell { margin-right: 1rem; margin-left: 1rem; }
   .scan-actions { margin-right: 1rem; margin-left: 1rem; }
   .manual-isbn { margin-right: 1rem; margin-left: 1rem; }
+  .continuous-scan-control { margin-right: 1rem; margin-left: 1rem; }
   .form-layout { padding: 1.2rem 1rem; }
   .form-fields { grid-template-columns: 1fr; }
   .field-wide { grid-column: auto; }
@@ -487,6 +498,8 @@ html[data-theme="dark"] .skeleton { background: linear-gradient(90deg, #26342d 2
   .amazon-fields .field-wide, .secret-help { grid-column: auto; }
   .amazon-method summary { align-items: flex-start; flex-wrap: wrap; }
   .amazon-method summary > span:first-child { width: 100%; flex-basis: 100%; }
+  .saved-secret-note { align-items: stretch; flex-direction: column; }
+  .saved-secret-note .button { width: 100%; }
 }
 
 @media (max-width: 380px) {

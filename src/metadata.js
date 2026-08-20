@@ -576,6 +576,14 @@ function amazonCookieCredentials(options = {}) {
   return cookie && isSupportedAmazonMarketplace(marketplace) ? { cookie, marketplace } : null;
 }
 
+export async function checkAmazonCookie(options = {}) {
+  const credentials = amazonCookieCredentials(options);
+  if (!credentials) throw new Error("No Amazon cookie is saved.");
+  const books = await searchAmazonCookie({ isbn: "", title: "The Hobbit", author: "J. R. R. Tolkien" }, credentials);
+  if (!books.length) throw new Error("Amazon returned no book results. The cookie may be expired or incomplete.");
+  return { ok: true, count: books.length, marketplace: credentials.marketplace };
+}
+
 export async function lookupBookMetadata(isbn, options = {}) {
   const googleKey = String(options.googleBooksApiKey ?? "").trim();
   const amazon = amazonCredentials(options);

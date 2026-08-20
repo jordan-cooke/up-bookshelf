@@ -34,11 +34,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.2.0",
+      version: "2.3.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.2.0");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.3.0");
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -58,7 +58,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.2\.0/);
+    assert.match(html, /styles\.css\?v=2\.3\.0/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
@@ -71,12 +71,14 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(html, /id="metadata-search-form"/);
     assert.match(html, /id="metadata-results"/);
     assert.match(html, /id="amazon-cookie"/);
+    assert.match(html, /id="test-amazon-cookie"/);
+    assert.match(html, /id="continuous-scan"/);
     assert.match(html, /Simpler · less secure/);
     assert.match(html, /More secure · stable/);
     assert.match(html, />Book rating</);
     assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.2.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.3.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     const css = await stylesheet.text();
@@ -84,10 +86,12 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(css, /\.tagline-hidden \.hero/);
     assert.match(css, /\.metadata-result-grid/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.2.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.3.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
-    assert.match(await script.text(), /scanBarcodePhoto/);
+    const javascript = await script.text();
+    assert.match(javascript, /scanBarcodePhoto/);
+    assert.match(javascript, /resumeContinuousScanning/);
 
     const icon = await fetch(`${baseUrl}/icon.svg`);
     assert.equal(icon.status, 200);
@@ -204,13 +208,18 @@ test("persists a custom name and toggleable motto in SQLite", async () => {
   });
 });
 
-test("stores provider credentials without returning their values to the browser", async () => {
+test("stores and tests provider credentials without returning their values to the browser", async () => {
   let lookupOptions;
   const lookup = async (_isbn, options) => {
     lookupOptions = options;
     return { merged: null, providers: [] };
   };
-  await withServer({ lookup }, async (baseUrl) => {
+  let testedCookieOptions;
+  const testAmazonCookie = async (options) => {
+    testedCookieOptions = options;
+    return { ok: true, count: 3 };
+  };
+  await withServer({ lookup, testAmazonCookie }, async (baseUrl, database) => {
     const secrets = {
       googleBooksApiKey: "test-google-secret",
       amazonClientId: "test-amazon-id",
@@ -218,7 +227,7 @@ test("stores provider credentials without returning their values to the browser"
       amazonAssociateTag: "example-20",
       amazonCredentialVersion: "3.1",
       amazonMarketplace: "www.amazon.com",
-      amazonCookie: "session-id=test-cookie-secret; ubid-main=test-browser-session",
+      amazonCookie: "Cookie: session-id=test-cookie-secret; ubid-main=test-browser-session",
     };
     const saved = await fetch(`${baseUrl}/api/settings`, {
       method: "PUT",
@@ -236,6 +245,12 @@ test("stores provider credentials without returning their values to the browser"
     assert.equal(lookupOptions.googleBooksApiKey, "test-google-secret");
     assert.equal(lookupOptions.amazonClientSecret, "test-amazon-secret");
     assert.match(lookupOptions.amazonCookie, /test-cookie-secret/);
+    assert.equal(database.prepare("SELECT value FROM app_settings WHERE key = 'amazon_cookie'").get().value, "session-id=test-cookie-secret; ubid-main=test-browser-session");
+
+    const cookieTest = await fetch(`${baseUrl}/api/providers/amazon-cookie/test`, { method: "POST" });
+    assert.equal(cookieTest.status, 200);
+    assert.equal((await cookieTest.json()).count, 3);
+    assert.match(testedCookieOptions.amazonCookie, /test-cookie-secret/);
 
     const removed = await fetch(`${baseUrl}/api/settings`, {
       method: "PUT",
@@ -246,6 +261,14 @@ test("stores provider credentials without returning their values to the browser"
     assert.equal(removedConfig.providers.google.configured, false);
     assert.equal(removedConfig.providers.amazon.configured, false);
     assert.equal(removedConfig.providers.amazonCookie.configured, false);
+  });
+});
+
+test("explains when the Amazon cookie test has no saved cookie", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/providers/amazon-cookie/test`, { method: "POST" });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "Save an Amazon cookie before testing it." });
   });
 });
 

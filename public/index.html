@@ -7,7 +7,7 @@
     <meta name="description" content="A private, self-hosted home library." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=2.2.0" />
+    <link rel="stylesheet" href="/styles.css?v=2.3.0" />
     <title>UP Bookshelf</title>
   </head>
   <body>
@@ -113,6 +113,10 @@
         <button class="close-button" type="button" data-close="scanner-dialog" aria-label="Close scanner">×</button>
       </div>
       <p class="modal-intro">Find the ISBN barcode on the back cover—it begins with <strong>978</strong> or <strong>979</strong>. Avoid retailer stickers and other product barcodes. Take a clear photo and we’ll fill in the title, author, cover, and other details.</p>
+      <label class="continuous-scan-control" for="continuous-scan">
+        <span><strong>Continuous scan</strong><small>After adding a scanned book, return here automatically for the next one.</small></span>
+        <input id="continuous-scan" type="checkbox" />
+      </label>
       <div class="scan-actions" id="scan-actions">
         <button class="photo-scan-button" id="photo-scan-button" type="button">
           <span class="camera-disc" aria-hidden="true">
@@ -257,6 +261,7 @@
                 <div class="amazon-method-fields">
                   <div class="security-note security-warning"><strong>Important security note</strong><span>This unofficial method acts as your signed-in Amazon browser session. Use a secondary Amazon account if possible, never share the cookie, and expect it to expire or trigger Amazon verification. It can stop working if Amazon changes its pages.</span></div>
                   <div class="field"><label for="amazon-cookie">Full Cookie header value</label><input id="amazon-cookie" name="amazonCookie" type="password" autocomplete="new-password" spellcheck="false" placeholder="session-id=…; ubid-main=…; …" /><small>Paste the complete combined <strong>Cookie</strong> value from a signed-in Amazon request. Including the optional “Cookie:” prefix is okay. It is saved only in your SQLite database, never returned to the browser, and never included in exports.</small></div>
+                  <div class="saved-secret-note" id="amazon-cookie-saved-note" hidden><span><strong>Cookie saved</strong><small>The field stays blank after saving because UP Bookshelf never sends the stored cookie back to your browser.</small></span><button class="button button-secondary" id="test-amazon-cookie" type="button">Test saved cookie</button></div>
                   <label class="remove-secret" id="remove-amazon-cookie-row" hidden><input name="removeAmazonCookie" type="checkbox" /> Remove the saved Amazon cookie</label>
                 </div>
               </details>
@@ -288,6 +293,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
-    <script type="module" src="/app.js?v=2.2.0"></script>
+    <script type="module" src="/app.js?v=2.3.0"></script>
   </body>
 </html>

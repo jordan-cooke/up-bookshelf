@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import helmet from "helmet";
 import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
-import { isSupportedAmazonMarketplace, lookupBookMetadata, searchBookMetadata } from "./metadata.js";
+import { checkAmazonCookie, isSupportedAmazonMarketplace, lookupBookMetadata, searchBookMetadata } from "./metadata.js";
 import { cacheBookCover, coverCacheState, saveUploadedCover } from "./covers.js";
 import {
   createBook,
@@ -23,7 +23,7 @@ import {
 import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.2.0";
+export const APP_VERSION = "2.3.0";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
@@ -90,7 +90,14 @@ function providerLookupOptions(saved) {
   };
 }
 
-export function createApp({ database, lookup = lookupBookMetadata, searchMetadata = searchBookMetadata, trustProxy = false, coverDirectory = null }) {
+export function createApp({
+  database,
+  lookup = lookupBookMetadata,
+  searchMetadata = searchBookMetadata,
+  testAmazonCookie = checkAmazonCookie,
+  trustProxy = false,
+  coverDirectory = null,
+}) {
   const app = express();
   const currentConfig = () => {
     const saved = getAppSettings(database);
@@ -201,6 +208,18 @@ export function createApp({ database, lookup = lookupBookMetadata, searchMetadat
       return response.json(currentConfig());
     } catch (error) {
       return next(error);
+    }
+  });
+
+  app.post("/api/providers/amazon-cookie/test", async (_request, response) => {
+    const saved = getAppSettings(database);
+    if (!saved.amazon_cookie) return response.status(400).json({ error: "Save an Amazon cookie before testing it." });
+    try {
+      const result = await testAmazonCookie(providerLookupOptions(saved));
+      return response.json({ ok: true, count: Number(result?.count || 0), marketplace: saved.amazon_marketplace || "www.amazon.com" });
+    } catch (error) {
+      console.warn("Amazon cookie connection test failed:", error.message);
+      return response.status(502).json({ error: `Amazon cookie test failed: ${error.message}` });
     }
   });
 

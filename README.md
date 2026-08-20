@@ -95,6 +95,8 @@ To configure it from a desktop browser:
 3. Select the main Amazon document request and copy the complete combined **Cookie** request-header value—not one individual cookie.
 4. In UP Bookshelf, open **Settings → Book information providers → Amazon → Session cookie**, choose the same marketplace, paste the value, and save.
 
+After saving, the password-style field deliberately becomes blank. A **Cookie saved** notice confirms that it remains stored, and **Test saved cookie** performs a live Amazon search so an expired or unusable session can be identified immediately.
+
 Treat this value like a password. It is stored server-side in the mounted SQLite database, never sent back to the browser, and never included in exports. Anyone with access to the appdata database may still be able to read it, so protect appdata backups and do not publish the database. The cookie method follows the same practical precautions documented by [Grimmory](https://grimmory.org/docs/metadata/amazon-cookie/).
 
 ### Official Creators API — more secure and stable
@@ -108,6 +110,8 @@ Both methods can be configured at once and appear as separate, clearly labeled s
 Taking a barcode photo works on a normal local HTTP address. Browsers require a trusted HTTPS origin for the optional live scanner, camera enumeration, and flashlight controls.
 
 The live scanner lists every camera the browser exposes. It marks a likely rear/main lens as a recommended starting point but never locks the user to it; ultra-wide or another lens may focus better on a particular phone. The choice is saved only in that browser. The flashlight button appears only when the selected camera exposes torch capability.
+
+Enable **Continuous scan** inside the scanner when adding a large collection. The preference is remembered on that phone. After each new book is saved, live scanning starts again automatically. Photo scanning returns directly to the scanner so the next camera photo is only one tap away. Duplicate books are reported and skipped without interrupting the batch.
 
 For the most reliable scan:
 
@@ -174,7 +178,7 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.2.0 adds multi-edition metadata search and comparison, makes custom-cover uploads persist immediately on existing books, collapses the home hero when its motto is hidden, and adds both Amazon session-cookie and official Creators API options. Existing books, covers, settings, and secrets are preserved automatically.
+Release 2.3.0 makes saved Amazon cookies unmistakable and testable without exposing their value, and adds a remembered continuous-scan workflow for quickly cataloging large collections. Existing books, covers, settings, and secrets are preserved automatically.
 
 ## Local development
 
