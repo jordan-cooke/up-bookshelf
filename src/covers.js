@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 const CONTENT_TYPES = new Map([
   ["image/jpeg", "jpg"],
@@ -46,6 +47,15 @@ function cachedCoverPath(directory, isbn) {
 
 export function publicCoverPath(filePath) {
   return `/api/covers/${path.basename(filePath)}`;
+}
+
+export async function saveUploadedCover({ bytes, directory }) {
+  if (!directory || !Buffer.isBuffer(bytes) || bytes.length < 1024 || bytes.length > MAX_COVER_BYTES) return null;
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return null;
+  await fs.promises.mkdir(directory, { recursive: true });
+  const filePath = path.join(directory, `custom-${randomUUID()}.jpg`);
+  await fs.promises.writeFile(filePath, bytes, { flag: "wx" });
+  return publicCoverPath(filePath);
 }
 
 function coverMetadataPath(directory, isbn) {
@@ -135,7 +145,7 @@ export function coverCacheState(directory, filename) {
 }
 
 export function resolveCoverFile(directory, filename) {
-  if (!directory || !/^(?:97[89]\d{10}|\d{9}[\dX])\.(?:jpg|png|webp|avif)$/i.test(filename)) return null;
+  if (!directory || !/^(?:(?:97[89]\d{10}|\d{9}[\dX])|custom-[a-f0-9-]{36})\.(?:jpg|png|webp|avif)$/i.test(filename)) return null;
   const filePath = path.join(directory, filename);
   return fs.existsSync(filePath) ? filePath : null;
 }

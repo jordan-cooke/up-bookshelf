@@ -1,10 +1,10 @@
-name: jnc-bookshelf
+name: up-bookshelf
 
 services:
   app:
     build: .
-    image: jnc-bookshelf:latest
-    container_name: jnc-bookshelf
+    image: up-bookshelf:latest
+    container_name: up-bookshelf
     restart: unless-stopped
     ports:
       - "${APP_PORT:-3080}:3000"
@@ -12,18 +12,5 @@ services:
       NODE_ENV: production
       DB_PATH: /data/bookshelf.sqlite
       TRUST_PROXY: "${TRUST_PROXY:-0}"
-      # Optional label. Blank keeps the default "UP Bookshelf"; JnC becomes "JnC Bookshelf".
-      BOOKSHELF_NAME: "${BOOKSHELF_NAME:-}"
-
-      # Optional Google Books provider. Uncomment both here and in .env.
-      # GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
-
-      # Optional Amazon Creators API provider. It requires an approved Amazon
-      # Associates account, a Creators API app, and all fields below.
-      # AMAZON_CREATORS_CLIENT_ID: "${AMAZON_CREATORS_CLIENT_ID:-}"
-      # AMAZON_CREATORS_CLIENT_SECRET: "${AMAZON_CREATORS_CLIENT_SECRET:-}"
-      # AMAZON_CREATORS_CREDENTIAL_VERSION: "${AMAZON_CREATORS_CREDENTIAL_VERSION:-3.1}"
-      # AMAZON_ASSOCIATE_TAG: "${AMAZON_ASSOCIATE_TAG:-}"
-      # AMAZON_MARKETPLACE: "${AMAZON_MARKETPLACE:-www.amazon.com}"
     volumes:
       - "${APP_DATA_PATH:-./data}:/data"

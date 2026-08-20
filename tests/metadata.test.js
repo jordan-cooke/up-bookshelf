@@ -12,6 +12,14 @@ test("normalizes Google Books metadata and upgrades cover URLs", () => {
           industryIdentifiers: [{ type: "ISBN_13", identifier: "9780547773742" }],
           imageLinks: { large: "http://example.com/large-cover.jpg?edge=curl", thumbnail: "http://example.com/cover.jpg" },
           pageCount: 320,
+          averageRating: 4.4,
+          ratingsCount: 238,
+        },
+      }, {
+        volumeInfo: {
+          title: "A Wizard of Earthsea",
+          industryIdentifiers: [{ type: "ISBN_13", identifier: "9780547773742" }],
+          imageLinks: { large: "https://example.com/alternate-cover.jpg", thumbnail: "https://example.com/alternate-small.jpg" },
         },
       }],
     },
@@ -21,7 +29,14 @@ test("normalizes Google Books metadata and upgrades cover URLs", () => {
   assert.equal(result.title, "A Wizard of Earthsea");
   assert.deepEqual(result.authors, ["Ursula K. Le Guin"]);
   assert.equal(result.coverUrl, "https://example.com/large-cover.jpg");
+  assert.deepEqual(result.coverCandidates, [
+    "https://example.com/large-cover.jpg",
+    "https://example.com/alternate-cover.jpg",
+  ]);
   assert.equal(result.metadataSource, "Google Books");
+  assert.equal(result.bookRating, 4.4);
+  assert.equal(result.bookRatingsCount, 238);
+  assert.equal(result.bookRatingSource, "Google Books");
 });
 
 test("normalizes Open Library metadata", () => {

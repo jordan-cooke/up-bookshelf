@@ -35,6 +35,9 @@ const elements = {
   deleteBook: document.querySelector("#delete-book"),
   saveBook: document.querySelector("#save-book"),
   coverPreview: document.querySelector("#cover-preview"),
+  coverOptionsButton: document.querySelector("#cover-options-button"),
+  uploadCoverButton: document.querySelector("#upload-cover-button"),
+  customCoverFile: document.querySelector("#custom-cover-file"),
   providerToolbar: document.querySelector("#provider-toolbar"),
   providerSummary: document.querySelector("#provider-summary"),
   compareMetadata: document.querySelector("#compare-metadata"),
@@ -149,9 +152,38 @@ async function loadConfig() {
 function openSettings() {
   elements.settingsError.hidden = true;
   elements.settingsForm.elements.name.value = appConfig.customName || "";
-  elements.settingsForm.elements.tagline.value = appConfig.tagline || "";
+  elements.settingsForm.elements.tagline.value = appConfig.taglineText || appConfig.tagline || "";
+  elements.settingsForm.elements.taglineEnabled.checked = appConfig.taglineEnabled !== false;
+  elements.settingsForm.elements.googleBooksApiKey.value = "";
+  elements.settingsForm.elements.amazonClientId.value = "";
+  elements.settingsForm.elements.amazonClientSecret.value = "";
+  elements.settingsForm.elements.amazonAssociateTag.value = "";
+  elements.settingsForm.elements.amazonCredentialVersion.value = appConfig.providers?.amazon?.credentialVersion || "3.1";
+  elements.settingsForm.elements.amazonMarketplace.value = appConfig.providers?.amazon?.marketplace || "www.amazon.com";
+  elements.settingsForm.elements.removeGoogleBooksApiKey.checked = false;
+  elements.settingsForm.elements.removeAmazonCredentials.checked = false;
+  elements.settingsForm.elements.googleBooksApiKey.placeholder = appConfig.providers?.google?.configured
+    ? "Saved — leave blank to keep"
+    : "Paste a Google Books API key";
+  const amazonSaved = appConfig.providers?.amazon?.savedFields || {};
+  elements.settingsForm.elements.amazonClientId.placeholder = amazonSaved.clientId ? "Saved — leave blank to keep" : "Creator API client ID";
+  elements.settingsForm.elements.amazonClientSecret.placeholder = amazonSaved.clientSecret ? "Saved — leave blank to keep" : "Creator API client secret";
+  elements.settingsForm.elements.amazonAssociateTag.placeholder = amazonSaved.associateTag ? "Saved — leave blank to keep" : "your-tag-20";
+  document.querySelector("#google-settings-status").textContent = appConfig.providers?.google?.configured ? "Configured" : "Not configured";
+  const anyAmazonSaved = Object.values(amazonSaved).some(Boolean);
+  document.querySelector("#amazon-settings-status").textContent = appConfig.providers?.amazon?.configured
+    ? "Configured"
+    : (anyAmazonSaved ? "Setup incomplete" : "Not configured");
+  document.querySelector("#remove-google-row").hidden = !appConfig.providers?.google?.configured;
+  document.querySelector("#remove-amazon-row").hidden = !anyAmazonSaved;
+  syncTaglineControl();
   elements.settingsDialog.showModal();
   setTimeout(() => elements.settingsForm.elements.name.focus(), 50);
+}
+
+function syncTaglineControl() {
+  const enabled = elements.settingsForm.elements.taglineEnabled.checked;
+  elements.settingsForm.elements.tagline.disabled = !enabled;
 }
 
 async function saveSettings(event) {
@@ -160,7 +192,20 @@ async function saveSettings(event) {
   elements.saveSettings.disabled = true;
   elements.saveSettings.textContent = "Saving…";
   try {
-    const values = Object.fromEntries(new FormData(elements.settingsForm));
+    const fields = elements.settingsForm.elements;
+    const values = {
+      name: fields.name.value,
+      tagline: fields.tagline.value,
+      taglineEnabled: fields.taglineEnabled.checked,
+      googleBooksApiKey: fields.googleBooksApiKey.value,
+      removeGoogleBooksApiKey: fields.removeGoogleBooksApiKey.checked,
+      amazonClientId: fields.amazonClientId.value,
+      amazonClientSecret: fields.amazonClientSecret.value,
+      amazonAssociateTag: fields.amazonAssociateTag.value,
+      amazonCredentialVersion: fields.amazonCredentialVersion.value,
+      amazonMarketplace: fields.amazonMarketplace.value,
+      removeAmazonCredentials: fields.removeAmazonCredentials.checked,
+    };
     applyAppConfig(await api("/api/settings", { method: "PUT", body: JSON.stringify(values) }));
     elements.settingsDialog.close();
     toast("Bookshelf settings saved.");
@@ -178,7 +223,8 @@ function bookCard(book) {
   const cover = book.coverUrl
     ? `<img src="${escapeHtml(book.coverUrl)}" alt="Cover of ${escapeHtml(book.title)}" loading="lazy" />`
     : `<span class="cover-placeholder"><b>${escapeHtml(book.title.slice(0, 1))}</b><small>${escapeHtml(book.title)}</small></span>`;
-  const rating = book.rating ? `<span class="card-rating" aria-label="${book.rating} out of 5 stars">${"★".repeat(book.rating)}${"☆".repeat(5 - book.rating)}</span>` : "";
+  const userRating = book.rating ? `<span class="card-rating" aria-label="Your rating: ${book.rating} out of 5 stars"><b>Yours</b> ${"★".repeat(book.rating)}${"☆".repeat(5 - book.rating)}</span>` : "";
+  const bookRating = book.bookRating ? `<span class="card-book-rating" aria-label="Book rating: ${book.bookRating} out of 5"><b>Book</b> ${Number(book.bookRating).toFixed(1)} ★</span>` : "";
 
   return `
     <article class="book-card">
@@ -189,7 +235,7 @@ function bookCard(book) {
       <div class="book-info">
         <h3><button type="button" data-action="edit" data-id="${book.id}">${escapeHtml(book.title)}</button></h3>
         <p>${escapeHtml(author)}</p>
-        ${rating}
+        <span class="card-ratings">${bookRating}${userRating}</span>
       </div>
     </article>`;
 }
@@ -504,6 +550,59 @@ function updateCoverPreview() {
   elements.coverPreview.append(image);
 }
 
+function updateBookRatingDisplay() {
+  const fields = elements.bookForm.elements;
+  const source = fields.bookRatingSource.value.trim();
+  const count = Number(fields.bookRatingsCount.value);
+  const details = [];
+  if (source) details.push(source);
+  if (Number.isInteger(count) && count > 0) details.push(`${count.toLocaleString()} rating${count === 1 ? "" : "s"}`);
+  document.querySelector("#book-rating-source").textContent = details.join(" · ");
+}
+
+async function prepareCoverUpload(file) {
+  if (!file?.type?.startsWith("image/")) throw new Error("Choose an image file for the cover.");
+  if (!window.createImageBitmap) {
+    if (file.type === "image/jpeg" && file.size <= 8 * 1024 * 1024) return file;
+    throw new Error("This browser cannot prepare that image. Try a JPEG file.");
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1800 / bitmap.width, 2700 / bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+  if (!blob) throw new Error("The cover image could not be prepared.");
+  return blob;
+}
+
+async function uploadCustomCover(file) {
+  if (!file) return;
+  elements.uploadCoverButton.disabled = true;
+  elements.uploadCoverButton.textContent = "Uploading…";
+  try {
+    const body = await prepareCoverUpload(file);
+    const response = await fetch("/api/covers/upload", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Upload failed (${response.status})`);
+    setFormValue("coverUrl", result.coverUrl);
+    setFormValue("metadataSource", "Custom cover upload");
+    updateCoverPreview();
+    toast("Your cover was uploaded and selected.");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    elements.customCoverFile.value = "";
+    elements.uploadCoverButton.disabled = false;
+    elements.uploadCoverButton.textContent = "Upload your own cover";
+  }
+}
+
 function updateProviderToolbar() {
   const isbn = elements.bookForm.elements.isbn13.value || elements.bookForm.elements.isbn10.value;
   elements.providerToolbar.hidden = !isbn;
@@ -534,6 +633,9 @@ function openBookForm(book = {}, providers = []) {
     coverUrl: book.coverUrl,
     readingStatus: book.readingStatus || "unread",
     rating: book.rating,
+    bookRating: book.bookRating,
+    bookRatingsCount: book.bookRatingsCount,
+    bookRatingSource: book.bookRatingSource,
     description: book.description,
     notes: book.notes,
   };
@@ -544,6 +646,7 @@ function openBookForm(book = {}, providers = []) {
   elements.saveBook.textContent = editing ? "Save changes" : "Add to shelf";
   elements.deleteBook.hidden = !editing;
   updateCoverPreview();
+  updateBookRatingDisplay();
   updateProviderToolbar();
   elements.bookDialog.showModal();
   setTimeout(() => elements.bookForm.elements.title.focus(), 50);
@@ -573,7 +676,7 @@ function buildChoiceCatalog(field) {
 function renderMetadataChoices() {
   const availableProviders = activeProviders.filter((provider) => provider.available);
   elements.providerStatuses.innerHTML = activeProviders.map((provider) => {
-    const status = provider.available ? "Choices found" : (provider.configured ? "No match returned" : "API key not configured");
+    const status = provider.available ? "Choices found" : (provider.configured ? "No match returned" : "Not configured in settings");
     const providerLink = provider.book?.providerUrl
       ? `<a class="text-button" href="${escapeHtml(provider.book.providerUrl)}" target="_blank" rel="noreferrer">View</a>`
       : "";
@@ -585,28 +688,50 @@ function renderMetadataChoices() {
 
   coverCatalog = [];
   const addCover = (provider, url, providerId = "", providerIndex = 0) => {
-    if (!url || coverCatalog.some((cover) => cover.url === url)) return;
+    if (!url) return;
+    const existing = coverCatalog.find((cover) => cover.url === url);
+    if (existing) {
+      if (providerId && !existing.providerId) Object.assign(existing, { provider, providerId, providerIndex });
+      return;
+    }
     coverCatalog.push({ provider, providerId, providerIndex, url });
   };
   addCover("Current", currentFieldValue("coverUrl"));
   for (const provider of availableProviders) {
     const covers = provider.book?.coverCandidates?.length ? provider.book.coverCandidates : [provider.book?.coverUrl];
-    covers.slice(0, 4).forEach((url, index) => addCover(provider.name, url, provider.id, index));
+    covers.forEach((url, index) => addCover(provider.name, url, provider.id, index));
   }
 
   metadataCatalog = Object.fromEntries(METADATA_FIELDS.map(([field]) => [field, buildChoiceCatalog(field)]));
   metadataCatalog.description = buildChoiceCatalog("description");
+  metadataCatalog.bookRating = [];
+  const addRating = (provider, value, ratingsCount, source) => {
+    const rating = Number(value);
+    if (!Number.isFinite(rating) || metadataCatalog.bookRating.some((choice) => choice.provider === provider && choice.value === rating)) return;
+    metadataCatalog.bookRating.push({ provider, value: rating, ratingsCount: ratingsCount ?? "", source: source || provider });
+  };
+  addRating("Current", currentFieldValue("bookRating"), currentFieldValue("bookRatingsCount"), currentFieldValue("bookRatingSource"));
+  for (const provider of availableProviders) {
+    addRating(provider.name, provider.book?.bookRating, provider.book?.bookRatingsCount, provider.book?.bookRatingSource);
+  }
   const coverHtml = coverCatalog.length
     ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Cover</span><h3>Pick the straightest, clearest cover</h3></div><div class="cover-choice-grid">${coverCatalog.map((cover, index) => `
         <label class="cover-choice"><input type="radio" name="metadata-cover" value="${index}" data-provider="${escapeHtml(cover.provider)}" ${index === 0 ? "checked" : ""} /><span><img src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.provider)} cover option" loading="lazy" /><small>${escapeHtml(cover.provider)}</small></span></label>
       `).join("")}</div></section>`
     : `<section class="choice-section"><p class="choice-empty">No provider returned a cover for this edition.</p></section>`;
 
-  const fieldHtml = METADATA_FIELDS.map(([field, label]) => {
+  let fieldHtml = METADATA_FIELDS.map(([field, label]) => {
     const choices = metadataCatalog[field];
     if (!choices.length) return "";
     return `<label class="metadata-field"><span>${escapeHtml(label)}</span><select data-metadata-field="${field}">${choices.map((choice, index) => `<option value="${index}" data-provider="${escapeHtml(choice.provider)}">${escapeHtml(choice.value)} — ${escapeHtml(choice.provider)}</option>`).join("")}</select></label>`;
   }).join("");
+  if (metadataCatalog.bookRating.length) {
+    fieldHtml += `<label class="metadata-field"><span>Book rating</span><select data-metadata-field="bookRating">${metadataCatalog.bookRating.map((choice, index) => {
+      const count = Number(choice.ratingsCount);
+      const countText = Number.isInteger(count) && count > 0 ? ` (${count.toLocaleString()} ratings)` : "";
+      return `<option value="${index}" data-provider="${escapeHtml(choice.provider)}">${choice.value.toFixed(1)} / 5${countText} — ${escapeHtml(choice.source)}</option>`;
+    }).join("")}</select></label>`;
+  }
 
   const descriptions = metadataCatalog.description;
   const descriptionHtml = descriptions.length ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Description</span><h3>Pick the synopsis you prefer</h3></div><div class="description-choices">${descriptions.map((choice, index) => `
@@ -658,6 +783,10 @@ function applyMetadataChoices() {
     const choice = metadataCatalog[field]?.[Number(select.value)];
     if (!choice) return;
     setFormValue(field, choice.value);
+    if (field === "bookRating") {
+      setFormValue("bookRatingsCount", choice.ratingsCount);
+      setFormValue("bookRatingSource", choice.source);
+    }
     sources.push(choice.provider);
   });
   const coverInput = elements.metadataChoices.querySelector('input[name="metadata-cover"]:checked');
@@ -678,6 +807,7 @@ function applyMetadataChoices() {
   }
   setFormValue("metadataSource", [...new Set(sources.filter((source) => source !== "Current"))].join(" + "));
   updateCoverPreview();
+  updateBookRatingDisplay();
   elements.metadataDialog.close();
   toast("Your provider choices were applied.");
 }
@@ -777,6 +907,7 @@ document.addEventListener("click", (event) => {
 elements.themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 elements.settingsButton.addEventListener("click", openSettings);
 elements.settingsForm.addEventListener("submit", saveSettings);
+elements.settingsForm.elements.taglineEnabled.addEventListener("change", syncTaglineControl);
 elements.isbnForm.addEventListener("submit", (event) => {
   event.preventDefault();
   lookupIsbn(elements.isbnInput.value);
@@ -789,6 +920,9 @@ elements.torchButton.addEventListener("click", toggleTorch);
 elements.bookForm.addEventListener("submit", saveBook);
 elements.deleteBook.addEventListener("click", removeBook);
 elements.compareMetadata.addEventListener("click", openMetadataComparison);
+elements.coverOptionsButton.addEventListener("click", openMetadataComparison);
+elements.uploadCoverButton.addEventListener("click", () => elements.customCoverFile.click());
+elements.customCoverFile.addEventListener("change", () => uploadCustomCover(elements.customCoverFile.files?.[0]));
 elements.applyMetadata.addEventListener("click", applyMetadataChoices);
 elements.bookForm.elements.coverUrl.addEventListener("input", updateCoverPreview);
 elements.bookForm.elements.isbn13.addEventListener("input", updateProviderToolbar);

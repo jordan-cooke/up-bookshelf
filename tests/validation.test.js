@@ -8,6 +8,9 @@ test("normalizes a valid book payload", () => {
     authors: [" Ursula K. Le Guin ", "Ursula K. Le Guin"],
     isbn10: "0441478123",
     rating: "5",
+    bookRating: "4.3",
+    bookRatingsCount: "782",
+    bookRatingSource: "Google Books",
     readingStatus: "read",
     categories: "Science Fiction, Classics",
   });
@@ -16,6 +19,9 @@ test("normalizes a valid book payload", () => {
   assert.deepEqual(book.authors, ["Ursula K. Le Guin"]);
   assert.equal(book.isbn13, "9780441478125");
   assert.equal(book.rating, 5);
+  assert.equal(book.bookRating, 4.3);
+  assert.equal(book.bookRatingsCount, 782);
+  assert.equal(book.bookRatingSource, "Google Books");
   assert.deepEqual(book.categories, ["Science Fiction", "Classics"]);
 });
 
@@ -28,7 +34,14 @@ test("rejects non-http cover URLs", () => {
   assert.throws(() => validateBook({ title: "Book", coverUrl: "javascript:alert(1)" }), /Cover URL/);
 });
 
+test("rejects invalid provider ratings without affecting personal ratings", () => {
+  assert.throws(() => validateBook({ title: "Book", bookRating: "5.1" }), /Book rating/);
+  assert.throws(() => validateBook({ title: "Book", bookRatingsCount: "2.5" }), /rating count/);
+});
+
 test("allows a locally cached Bookshelf cover", () => {
   const book = validateBook({ title: "Book", coverUrl: "/api/covers/9781399745413.jpg" });
   assert.equal(book.coverUrl, "/api/covers/9781399745413.jpg");
+  const custom = validateBook({ title: "Book", coverUrl: "/api/covers/custom-123e4567-e89b-12d3-a456-426614174000.jpg" });
+  assert.equal(custom.coverUrl, "/api/covers/custom-123e4567-e89b-12d3-a456-426614174000.jpg");
 });

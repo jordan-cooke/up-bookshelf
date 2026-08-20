@@ -58,7 +58,7 @@ function descriptionText(value) {
     .trim();
 }
 
-function googleCoverCandidates(imageLinks = {}) {
+function bestGoogleCover(imageLinks = {}) {
   return unique([
     imageLinks.extraLarge,
     imageLinks.large,
@@ -66,7 +66,7 @@ function googleCoverCandidates(imageLinks = {}) {
     imageLinks.small,
     imageLinks.thumbnail,
     imageLinks.smallThumbnail,
-  ].map(cleanGoogleCoverUrl));
+  ].map(cleanGoogleCoverUrl))[0] || null;
 }
 
 function googlePreferredCoverCandidates(imageLinks = {}) {
@@ -75,11 +75,10 @@ function googlePreferredCoverCandidates(imageLinks = {}) {
 
 function openLibraryCoverCandidates(book = {}, edition = {}, work = {}) {
   const coverIds = unique([...(edition.covers || []), ...(work.covers || [])]);
+  const summaryCover = book.cover?.large || book.cover?.medium || book.cover?.small;
   return unique([
     ...coverIds.map((coverId) => `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false`),
-    book.cover?.large,
-    book.cover?.medium,
-    book.cover?.small,
+    summaryCover,
   ].map(httpsUrl));
 }
 
@@ -89,16 +88,18 @@ function providerResult(id, name, configured, book = null, error = "") {
 
 export function normalizeGoogleBook(payload, requestedIsbn) {
   const requested = cleanIsbn(requestedIsbn);
-  const matchingItem = payload?.items?.find((item) => (
+  const matchingItems = (payload?.items || []).filter((item) => (
     (item.volumeInfo?.industryIdentifiers || []).some((identifier) => cleanIsbn(identifier.identifier) === requested)
   ));
+  const matchingItem = matchingItems[0];
   const volume = (matchingItem || payload?.items?.[0])?.volumeInfo;
   if (!volume) return null;
 
   const identifiers = volume.industryIdentifiers || [];
   const isbn13 = identifiers.find((item) => item.type === "ISBN_13")?.identifier;
   const isbn10 = identifiers.find((item) => item.type === "ISBN_10")?.identifier;
-  const coverCandidates = googleCoverCandidates(volume.imageLinks);
+  const candidateItems = matchingItems.length ? matchingItems : (payload?.items || []).slice(0, 1);
+  const coverCandidates = unique(candidateItems.map((item) => bestGoogleCover(item.volumeInfo?.imageLinks)));
   const preferredCoverCandidates = googlePreferredCoverCandidates(volume.imageLinks);
 
   return {
@@ -116,6 +117,9 @@ export function normalizeGoogleBook(payload, requestedIsbn) {
     coverCandidates,
     preferredCoverCandidates,
     language: volume.language || "",
+    bookRating: Number.isFinite(volume.averageRating) ? volume.averageRating : null,
+    bookRatingsCount: Number.isInteger(volume.ratingsCount) ? volume.ratingsCount : null,
+    bookRatingSource: Number.isFinite(volume.averageRating) ? "Google Books" : "",
     metadataSource: "Google Books",
   };
 }
@@ -220,7 +224,10 @@ export function mergeBookMetadata(primary, fallback) {
   if (!primary) return fallback;
   if (!fallback) return primary;
 
-  const scalarFields = ["title", "subtitle", "isbn13", "isbn10", "publisher", "publishedDate", "description", "pageCount", "language"];
+  const scalarFields = [
+    "title", "subtitle", "isbn13", "isbn10", "publisher", "publishedDate", "description", "pageCount", "language",
+    "bookRating", "bookRatingsCount", "bookRatingSource",
+  ];
   const merged = { ...fallback, ...primary };
   for (const field of scalarFields) merged[field] = primary[field] || fallback[field] || (field === "pageCount" ? null : "");
   merged.authors = primary.authors?.length ? primary.authors : fallback.authors || [];
@@ -335,17 +342,17 @@ async function lookupAmazon(isbn, credentials) {
 
 function amazonCredentials(options = {}) {
   const credentials = {
-    clientId: String(options.amazonClientId ?? process.env.AMAZON_CREATORS_CLIENT_ID ?? "").trim(),
-    clientSecret: String(options.amazonClientSecret ?? process.env.AMAZON_CREATORS_CLIENT_SECRET ?? "").trim(),
-    credentialVersion: String(options.amazonCredentialVersion ?? process.env.AMAZON_CREATORS_CREDENTIAL_VERSION ?? "3.1").trim(),
-    partnerTag: String(options.amazonPartnerTag ?? process.env.AMAZON_ASSOCIATE_TAG ?? "").trim(),
-    marketplace: String(options.amazonMarketplace ?? process.env.AMAZON_MARKETPLACE ?? "www.amazon.com").trim(),
+    clientId: String(options.amazonClientId ?? "").trim(),
+    clientSecret: String(options.amazonClientSecret ?? "").trim(),
+    credentialVersion: String(options.amazonCredentialVersion ?? "3.1").trim(),
+    partnerTag: String(options.amazonPartnerTag ?? "").trim(),
+    marketplace: String(options.amazonMarketplace ?? "www.amazon.com").trim(),
   };
   return Object.values(credentials).every(Boolean) ? credentials : null;
 }
 
 export async function lookupBookMetadata(isbn, options = {}) {
-  const googleKey = String(options.googleBooksApiKey ?? process.env.GOOGLE_BOOKS_API_KEY ?? "").trim();
+  const googleKey = String(options.googleBooksApiKey ?? "").trim();
   const amazon = amazonCredentials(options);
   const jobs = [
     {
@@ -379,7 +386,9 @@ export async function lookupBookMetadata(isbn, options = {}) {
   }));
   const merged = mergeProviderBooks(providers.map((provider) => provider.book));
   if (merged) {
-    const coverOrder = ["amazon", "openlibrary", "google"];
+    // Google and Open Library usually provide a straight front cover. Amazon
+    // variants remain available in the picker but do not become the default.
+    const coverOrder = ["google", "openlibrary", "amazon"];
     const coverCandidates = unique(coverOrder.flatMap((id) => {
       const book = providers.find((provider) => provider.id === id)?.book;
       return [...(book?.preferredCoverCandidates || []), ...(book?.coverCandidates || [])];

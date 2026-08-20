@@ -34,11 +34,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.0.0",
+      version: "2.1.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.0.0");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.1.0");
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -58,19 +58,25 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.0\.0/);
+    assert.match(html, /styles\.css\?v=2\.1\.0/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
     assert.match(html, /id="torch-button"/);
     assert.match(html, /id="metadata-dialog"/);
+    assert.match(html, /id="cover-options-button"/);
+    assert.match(html, /id="custom-cover-file"/);
+    assert.match(html, /id="google-books-key"/);
+    assert.match(html, /id="settings-tagline-enabled"/);
+    assert.match(html, />Book rating</);
+    assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.0.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.1.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     assert.match(await stylesheet.text(), /\.site-header/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.0.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.1.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     assert.match(await script.text(), /scanBarcodePhoto/);
@@ -101,12 +107,18 @@ test("creates, searches, updates, and deletes a SQLite-backed book", async () =>
         authors: ["Ursula K. Le Guin"],
         isbn13: "9780547773742",
         readingStatus: "reading",
+        bookRating: 4.6,
+        bookRatingsCount: 1204,
+        bookRatingSource: "Google Books",
       }),
     });
     assert.equal(createResponse.status, 201);
     const created = await createResponse.json();
     assert.equal(created.id, 1);
     assert.equal(created.readingStatus, "reading");
+    assert.equal(created.bookRating, 4.6);
+    assert.equal(created.bookRatingsCount, 1204);
+    assert.equal(created.bookRatingSource, "Google Books");
 
     const searchResponse = await fetch(`${baseUrl}/api/books?q=Earthsea`);
     const search = await searchResponse.json();
@@ -158,35 +170,70 @@ test("looks up a valid ISBN and returns normalized book details", async () => {
   });
 });
 
-test("uses an optional private library name without changing the image", async () => {
-  await withServer({ bookshelfName: "JnC" }, async (baseUrl) => {
-    assert.equal((await (await fetch(`${baseUrl}/api/config`)).json()).appName, "JnC Bookshelf");
-    assert.equal((await (await fetch(`${baseUrl}/manifest.webmanifest`)).json()).name, "JnC Bookshelf");
-    assert.equal((await (await fetch(`${baseUrl}/api/health`)).json()).app, "JnC Bookshelf");
-  });
-});
-
-test("persists a custom name and removable welcome message in SQLite", async () => {
-  await withServer({ bookshelfName: "Family" }, async (baseUrl) => {
+test("persists a custom name and toggleable motto in SQLite", async () => {
+  await withServer({}, async (baseUrl) => {
     const saved = await fetch(`${baseUrl}/api/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "JnC", tagline: "Our stories live here." }),
+      body: JSON.stringify({ name: "Family", tagline: "Our stories live here.", taglineEnabled: true }),
     });
     assert.equal(saved.status, 200);
     assert.deepEqual({
       appName: (await saved.json()).appName,
       tagline: (await (await fetch(`${baseUrl}/api/config`)).json()).tagline,
-    }, { appName: "JnC Bookshelf", tagline: "Our stories live here." });
+    }, { appName: "Family Bookshelf", tagline: "Our stories live here." });
 
     await fetch(`${baseUrl}/api/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "", tagline: "" }),
+      body: JSON.stringify({ name: "", tagline: "Our stories live here.", taglineEnabled: false }),
     });
     const reset = await (await fetch(`${baseUrl}/api/config`)).json();
-    assert.equal(reset.appName, "Family Bookshelf");
+    assert.equal(reset.appName, "UP Bookshelf");
     assert.equal(reset.tagline, "");
+    assert.equal(reset.taglineText, "Our stories live here.");
+    assert.equal(reset.taglineEnabled, false);
+  });
+});
+
+test("stores provider credentials without returning their values to the browser", async () => {
+  let lookupOptions;
+  const lookup = async (_isbn, options) => {
+    lookupOptions = options;
+    return { merged: null, providers: [] };
+  };
+  await withServer({ lookup }, async (baseUrl) => {
+    const secrets = {
+      googleBooksApiKey: "test-google-secret",
+      amazonClientId: "test-amazon-id",
+      amazonClientSecret: "test-amazon-secret",
+      amazonAssociateTag: "example-20",
+      amazonCredentialVersion: "3.1",
+      amazonMarketplace: "www.amazon.com",
+    };
+    const saved = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "", tagline: "Every good story", taglineEnabled: true, ...secrets }),
+    });
+    assert.equal(saved.status, 200);
+    const config = await saved.json();
+    assert.equal(config.providers.google.configured, true);
+    assert.equal(config.providers.amazon.configured, true);
+    assert.doesNotMatch(JSON.stringify(config), /test-google-secret|test-amazon-secret|test-amazon-id/);
+
+    assert.equal((await fetch(`${baseUrl}/api/metadata/9780547928227`)).status, 404);
+    assert.equal(lookupOptions.googleBooksApiKey, "test-google-secret");
+    assert.equal(lookupOptions.amazonClientSecret, "test-amazon-secret");
+
+    const removed = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "", tagline: "Every good story", taglineEnabled: true, removeGoogleBooksApiKey: true, removeAmazonCredentials: true }),
+    });
+    const removedConfig = await removed.json();
+    assert.equal(removedConfig.providers.google.configured, false);
+    assert.equal(removedConfig.providers.amazon.configured, false);
   });
 });
 
@@ -223,7 +270,7 @@ test("the local library does not require authentication", async () => {
 });
 
 test("serves cached covers from the persistent data directory", async () => {
-  const coverDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jnc-app-covers-"));
+  const coverDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-app-covers-"));
   try {
     await fs.promises.writeFile(path.join(coverDirectory, "9781399745413.jpg"), Buffer.alloc(2048, 1));
     await withServer({ coverDirectory }, async (baseUrl) => {
@@ -233,6 +280,31 @@ test("serves cached covers from the persistent data directory", async () => {
       assert.match(cover.headers.get("cache-control"), /immutable/);
       assert.equal((await cover.arrayBuffer()).byteLength, 2048);
       assert.equal((await fetch(`${baseUrl}/api/covers/not-a-cover.jpg`)).status, 404);
+    });
+  } finally {
+    await fs.promises.rm(coverDirectory, { recursive: true, force: true });
+  }
+});
+
+test("uploads a custom cover into persistent storage", async () => {
+  const coverDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-custom-covers-"));
+  try {
+    const jpeg = Buffer.alloc(2048, 7);
+    jpeg[0] = 0xff;
+    jpeg[1] = 0xd8;
+    jpeg[2] = 0xff;
+    await withServer({ coverDirectory }, async (baseUrl) => {
+      const upload = await fetch(`${baseUrl}/api/covers/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "image/jpeg" },
+        body: jpeg,
+      });
+      assert.equal(upload.status, 201);
+      const { coverUrl } = await upload.json();
+      assert.match(coverUrl, /^\/api\/covers\/custom-[a-f0-9-]{36}\.jpg$/);
+      const cover = await fetch(`${baseUrl}${coverUrl}`);
+      assert.equal(cover.status, 200);
+      assert.equal((await cover.arrayBuffer()).byteLength, jpeg.length);
     });
   } finally {
     await fs.promises.rm(coverDirectory, { recursive: true, force: true });

@@ -4,6 +4,7 @@ const SORT_COLUMNS = {
   author: "author_sort",
   published: "published_date",
   rating: "rating",
+  bookRating: "book_rating",
   updated: "updated_at",
 };
 
@@ -34,6 +35,9 @@ function mapBook(row) {
     language: row.language || "",
     readingStatus: row.reading_status,
     rating: row.rating,
+    bookRating: row.book_rating,
+    bookRatingsCount: row.book_ratings_count,
+    bookRatingSource: row.book_rating_source || "",
     notes: row.notes || "",
     metadataSource: row.metadata_source || "",
     createdAt: row.created_at,
@@ -58,6 +62,9 @@ function valuesFor(book) {
     book.language,
     book.readingStatus,
     book.rating,
+    book.bookRating,
+    book.bookRatingsCount,
+    book.bookRatingSource,
     book.notes,
     book.metadataSource,
   ];
@@ -87,6 +94,9 @@ export function initializeDatabase(database) {
       reading_status TEXT NOT NULL DEFAULT 'unread'
         CHECK (reading_status IN ('unread', 'reading', 'read', 'dnf')),
       rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
+      book_rating REAL CHECK (book_rating IS NULL OR book_rating BETWEEN 1 AND 5),
+      book_ratings_count INTEGER CHECK (book_ratings_count IS NULL OR book_ratings_count >= 0),
+      book_rating_source TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       metadata_source TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -104,6 +114,11 @@ export function initializeDatabase(database) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  const columns = new Set(database.prepare("PRAGMA table_info(books)").all().map((column) => column.name));
+  if (!columns.has("book_rating")) database.exec("ALTER TABLE books ADD COLUMN book_rating REAL CHECK (book_rating IS NULL OR book_rating BETWEEN 1 AND 5)");
+  if (!columns.has("book_ratings_count")) database.exec("ALTER TABLE books ADD COLUMN book_ratings_count INTEGER CHECK (book_ratings_count IS NULL OR book_ratings_count >= 0)");
+  if (!columns.has("book_rating_source")) database.exec("ALTER TABLE books ADD COLUMN book_rating_source TEXT NOT NULL DEFAULT ''");
 }
 
 export function getAppSettings(database) {
@@ -118,6 +133,19 @@ export function saveAppSettings(database, settings) {
   database.exec("BEGIN");
   try {
     for (const [key, value] of Object.entries(settings)) statement.run(key, String(value));
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+  return getAppSettings(database);
+}
+
+export function deleteAppSettings(database, keys) {
+  const statement = database.prepare("DELETE FROM app_settings WHERE key = ?");
+  database.exec("BEGIN");
+  try {
+    for (const key of keys) statement.run(key);
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");
@@ -166,8 +194,9 @@ export function createBook(database, book) {
   const result = database.prepare(`
     INSERT INTO books (
       title, subtitle, authors, author_sort, isbn_10, isbn_13, publisher, published_date,
-      description, page_count, categories, cover_url, language, reading_status, rating, notes, metadata_source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      description, page_count, categories, cover_url, language, reading_status, rating,
+      book_rating, book_ratings_count, book_rating_source, notes, metadata_source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(...valuesFor(book));
   return getBook(database, result.lastInsertRowid);
 }
@@ -177,7 +206,7 @@ export function updateBook(database, id, book) {
     UPDATE books SET
       title = ?, subtitle = ?, authors = ?, author_sort = ?, isbn_10 = ?, isbn_13 = ?, publisher = ?, published_date = ?,
       description = ?, page_count = ?, categories = ?, cover_url = ?, language = ?, reading_status = ?, rating = ?,
-      notes = ?, metadata_source = ?, updated_at = CURRENT_TIMESTAMP
+      book_rating = ?, book_ratings_count = ?, book_rating_source = ?, notes = ?, metadata_source = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(...valuesFor(book), id);
   return result.changes ? getBook(database, id) : null;

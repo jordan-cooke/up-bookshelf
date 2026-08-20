@@ -191,7 +191,10 @@ h2 { margin: 0; font-family: var(--serif); font-size: clamp(2rem, 4vw, 3.2rem); 
 .book-info h3 { margin: 0; font-family: var(--serif); font-size: 1.04rem; font-weight: 600; line-height: 1.2; }
 .book-info h3 button { width: 100%; padding: 0; overflow: hidden; border: 0; background: none; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .book-info p { margin: .28rem 0 0; overflow: hidden; color: var(--muted); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
-.card-rating { display: block; margin-top: .35rem; color: var(--gold); font-size: .75rem; letter-spacing: .03em; }
+.card-ratings { display: flex; flex-wrap: wrap; gap: .25rem .55rem; margin-top: .35rem; }
+.card-rating, .card-book-rating { color: var(--gold); font-size: .72rem; letter-spacing: .02em; }
+.card-rating b, .card-book-rating b { color: var(--muted); font-size: .62rem; letter-spacing: .08em; text-transform: uppercase; }
+.field-help { display: block; min-height: 1.1em; margin: .3rem .1rem 0; color: var(--muted); font-size: .72rem; }
 
 .empty-state { max-width: 500px; margin: 4rem auto; text-align: center; }
 .empty-state h3 { margin: 1.5rem 0 .5rem; font-family: var(--serif); font-size: 1.8rem; font-weight: 400; }
@@ -272,8 +275,10 @@ dialog::backdrop { background: rgb(25 34 30 / 60%); backdrop-filter: blur(3px); 
 .provider-toolbar div { display: flex; min-width: 0; flex-direction: column; gap: .2rem; }
 .provider-toolbar strong { font-family: var(--serif); font-size: 1rem; }
 .provider-toolbar span { color: var(--muted); font-size: .76rem; line-height: 1.4; }
-.cover-preview { position: sticky; top: 7.5rem; display: flex; width: 175px; height: 263px; overflow: hidden; align-items: center; justify-content: center; border-radius: 4px 9px 9px 4px; color: var(--muted); background: var(--paper-deep); box-shadow: 5px 7px 18px rgb(38 54 47 / 14%); text-align: center; }
+.cover-column { position: sticky; top: 7.5rem; display: flex; align-self: start; flex-direction: column; gap: .65rem; }
+.cover-preview { display: flex; width: 175px; height: 263px; overflow: hidden; align-items: center; justify-content: center; border-radius: 4px 9px 9px 4px; color: var(--muted); background: var(--paper-deep); box-shadow: 5px 7px 18px rgb(38 54 47 / 14%); text-align: center; }
 .cover-preview img { width: 100%; height: 100%; object-fit: contain; }
+.cover-action { width: 175px; font-size: .76rem; }
 .form-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .field { min-width: 0; }
 .field-wide { grid-column: 1 / -1; }
@@ -287,10 +292,28 @@ html[data-theme="dark"] .field input, html[data-theme="dark"] .field select, htm
 .action-spacer { flex: 1; }
 .danger-button { color: var(--danger); }
 
-.settings-modal { width: min(620px, calc(100% - 2rem)); }
+.settings-modal { width: min(800px, calc(100% - 2rem)); }
 .settings-fields { display: grid; padding: 1.5rem 1.6rem; gap: 1.2rem; }
 .settings-fields .field small { display: block; margin: .4rem .15rem 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
 .settings-fields textarea { min-height: 110px; }
+.settings-section { display: grid; padding: 1.1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--paper); gap: 1rem; }
+.settings-section > .eyebrow { margin: 0; }
+.toggle-field { display: flex; align-items: center; justify-content: space-between; gap: 1rem; cursor: pointer; }
+.toggle-field > span { display: flex; flex-direction: column; gap: .2rem; }
+.toggle-field strong { font-size: .88rem; }
+.toggle-field small, .provider-setting small, .provider-setting-heading small, .provider-setting-block summary small { color: var(--muted); font-size: .74rem; line-height: 1.4; }
+.toggle-field input { width: 42px; height: 22px; accent-color: var(--green); }
+.provider-setting, .provider-setting-heading, .provider-setting-block summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.provider-setting > div, .provider-setting-heading > div, .provider-setting-block summary > span:first-child { display: flex; min-width: 0; flex-direction: column; gap: .2rem; }
+.provider-setting-block { display: grid; padding: 1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); gap: 1rem; }
+.provider-setting-block summary { cursor: pointer; list-style: none; }
+.provider-setting-block summary::-webkit-details-marker { display: none; }
+.provider-setting-block summary::before { content: "+"; order: 3; color: var(--green); font-size: 1.35rem; }
+.provider-setting-block[open] summary::before { content: "−"; }
+.settings-status { flex: none; padding: .3rem .55rem; border-radius: 999px; color: var(--green-dark); background: var(--green-soft); font-size: .66rem; font-weight: 800; white-space: nowrap; }
+.amazon-fields { display: grid; padding-top: .9rem; border-top: 1px solid var(--border); grid-template-columns: 1fr 1fr; gap: .9rem; }
+.secret-help { grid-column: 1 / -1; color: var(--muted); line-height: 1.5; }
+.remove-secret { display: flex; align-items: center; gap: .45rem; color: var(--danger); font-size: .75rem; font-weight: 700; }
 
 .metadata-modal { width: min(1040px, calc(100% - 2rem)); }
 .provider-statuses { display: grid; margin: 0 1.6rem 1.2rem; grid-template-columns: repeat(3, 1fr); gap: .65rem; }
@@ -364,7 +387,9 @@ html[data-theme="dark"] .skeleton { background: linear-gradient(90deg, #26342d 2
   .book-grid { grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 1.7rem 1.1rem; }
   .floating-scan { display: grid; }
   .form-layout { grid-template-columns: 1fr; }
-  .cover-preview { position: relative; top: auto; width: 120px; height: 180px; margin: 0 auto; }
+  .cover-column { position: relative; top: auto; align-items: center; }
+  .cover-preview { width: 120px; height: 180px; margin: 0 auto; }
+  .cover-action { width: min(240px, 100%); }
   .provider-statuses { grid-template-columns: 1fr; }
 }
 
@@ -399,6 +424,8 @@ html[data-theme="dark"] .skeleton { background: linear-gradient(90deg, #26342d 2
   .metadata-field-grid { grid-template-columns: 1fr; }
   .cover-choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings-fields { padding-right: 1rem; padding-left: 1rem; }
+  .amazon-fields { grid-template-columns: 1fr; }
+  .amazon-fields .field-wide, .secret-help { grid-column: auto; }
 }
 
 @media (max-width: 380px) {

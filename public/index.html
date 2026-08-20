@@ -7,7 +7,7 @@
     <meta name="description" content="A private, self-hosted home library." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=2.0.0" />
+    <link rel="stylesheet" href="/styles.css?v=2.1.0" />
     <title>UP Bookshelf</title>
   </head>
   <body>
@@ -84,7 +84,8 @@
               <option value="title:asc">Title A–Z</option>
               <option value="title:desc">Title Z–A</option>
               <option value="author:asc">Author A–Z</option>
-              <option value="rating:desc">Highest rated</option>
+              <option value="rating:desc">Highest user rating</option>
+              <option value="bookRating:desc">Highest book rating</option>
               <option value="published:desc">Newest published</option>
             </select>
           </label>
@@ -165,7 +166,12 @@
         </div>
 
         <div class="form-layout">
-          <div class="cover-preview" id="cover-preview"><span>Cover<br />preview</span></div>
+          <div class="cover-column">
+            <div class="cover-preview" id="cover-preview"><span>Cover<br />preview</span></div>
+            <button class="button button-secondary cover-action" id="cover-options-button" type="button">Choose from providers</button>
+            <button class="text-button cover-action" id="upload-cover-button" type="button">Upload your own cover</button>
+            <input id="custom-cover-file" type="file" accept="image/*" hidden />
+          </div>
           <div class="form-fields">
             <div class="field field-wide"><label for="book-title">Title <b>*</b></label><input id="book-title" name="title" required maxlength="500" /></div>
             <div class="field field-wide"><label for="book-subtitle">Subtitle</label><input id="book-subtitle" name="subtitle" maxlength="500" /></div>
@@ -179,7 +185,8 @@
             <div class="field field-wide"><label for="book-categories">Genres / subjects</label><input id="book-categories" name="categories" placeholder="Fantasy, Mystery, History…" /></div>
             <div class="field field-wide"><label for="book-cover">Cover image URL</label><input id="book-cover" name="coverUrl" inputmode="url" /></div>
             <div class="field"><label for="book-status">Reading status</label><select id="book-status" name="readingStatus"><option value="unread">Want to read</option><option value="reading">Reading now</option><option value="read">Finished</option><option value="dnf">Did not finish</option></select></div>
-            <div class="field"><label for="book-rating">Rating</label><select id="book-rating" name="rating"><option value="">Not rated</option><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option></select></div>
+            <div class="field"><label for="book-community-rating">Book rating</label><input id="book-community-rating" name="bookRating" type="number" min="1" max="5" step="0.1" readonly placeholder="Not available" /><small class="field-help" id="book-rating-source"></small><input type="hidden" name="bookRatingsCount" /><input type="hidden" name="bookRatingSource" /></div>
+            <div class="field"><label for="book-rating">Your rating</label><select id="book-rating" name="rating"><option value="">Not rated</option><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option></select></div>
             <div class="field field-wide"><label for="book-description">Description</label><textarea id="book-description" name="description" rows="4"></textarea></div>
             <div class="field field-wide"><label for="book-notes">Personal notes</label><textarea id="book-notes" name="notes" rows="3" placeholder="Favorite quotes, who lent it to you, thoughts…"></textarea></div>
           </div>
@@ -217,8 +224,36 @@
           <button class="close-button" type="button" data-close="settings-dialog" aria-label="Close settings">×</button>
         </div>
         <div class="settings-fields">
-          <div class="field"><label for="settings-name">Bookshelf name</label><input id="settings-name" name="name" maxlength="40" placeholder="UP" /><small>Enter JnC for “JnC Bookshelf.” Leave blank to use the Docker default.</small></div>
-          <div class="field"><label for="settings-tagline">Welcome message</label><textarea id="settings-tagline" name="tagline" rows="4" maxlength="240" placeholder="Every good story,&#10;right where you left it."></textarea><small>Use a new line for the italic second line. Leave this blank to remove the large welcome message.</small></div>
+          <section class="settings-section">
+            <p class="eyebrow">Personalization</p>
+            <div class="field"><label for="settings-name">Bookshelf name</label><input id="settings-name" name="name" maxlength="40" placeholder="UP" /><small>Name your bookshelf. Leave blank to use the default “UP Bookshelf” name.</small></div>
+            <label class="toggle-field" for="settings-tagline-enabled"><span><strong>Show motto</strong><small>Display the welcome message on the home screen.</small></span><input id="settings-tagline-enabled" name="taglineEnabled" type="checkbox" checked /></label>
+            <div class="field"><label for="settings-tagline">Motto</label><textarea id="settings-tagline" name="tagline" rows="4" maxlength="240" placeholder="Every good story,&#10;right where you left it."></textarea><small>Use a new line for the italic second line. Turn off “Show motto” to hide it without losing your text.</small></div>
+          </section>
+
+          <section class="settings-section provider-settings">
+            <p class="eyebrow">Book information providers</p>
+            <div class="provider-setting always-on"><div><strong>Open Library</strong><small>Available automatically—no API key required.</small></div><span class="settings-status">Always on</span></div>
+
+            <div class="provider-setting-block">
+              <div class="provider-setting-heading"><div><strong>Google Books</strong><small>Add a key for another source of covers and descriptions.</small></div><span class="settings-status" id="google-settings-status">Not configured</span></div>
+              <div class="field"><label for="google-books-key">API key</label><input id="google-books-key" name="googleBooksApiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a Google Books API key" /><small>Saved keys are never sent back to the browser. Leave blank to keep the currently saved key.</small></div>
+              <label class="remove-secret" id="remove-google-row" hidden><input name="removeGoogleBooksApiKey" type="checkbox" /> Remove the saved Google Books key</label>
+            </div>
+
+            <details class="provider-setting-block">
+              <summary><span><strong>Amazon Creators API</strong><small>Optional provider for eligible Amazon Associates applications.</small></span><span class="settings-status" id="amazon-settings-status">Not configured</span></summary>
+              <div class="amazon-fields">
+                <div class="field"><label for="amazon-client-id">Client ID</label><input id="amazon-client-id" name="amazonClientId" type="password" autocomplete="new-password" spellcheck="false" placeholder="Creator API client ID" /></div>
+                <div class="field"><label for="amazon-client-secret">Client secret</label><input id="amazon-client-secret" name="amazonClientSecret" type="password" autocomplete="new-password" spellcheck="false" placeholder="Creator API client secret" /></div>
+                <div class="field"><label for="amazon-associate-tag">Associate tag</label><input id="amazon-associate-tag" name="amazonAssociateTag" spellcheck="false" placeholder="your-tag-20" /></div>
+                <div class="field"><label for="amazon-credential-version">Credential region</label><select id="amazon-credential-version" name="amazonCredentialVersion"><option value="3.1">North America (3.1)</option><option value="3.2">Europe (3.2)</option><option value="3.3">Far East (3.3)</option></select></div>
+                <div class="field field-wide"><label for="amazon-marketplace">Marketplace</label><input id="amazon-marketplace" name="amazonMarketplace" value="www.amazon.com" spellcheck="false" /></div>
+                <small class="secret-help">Leave credential fields blank to retain saved values. Amazon requires an approved Creators API application and the correct Associate tag for the chosen marketplace.</small>
+                <label class="remove-secret field-wide" id="remove-amazon-row" hidden><input name="removeAmazonCredentials" type="checkbox" /> Remove all saved Amazon credentials</label>
+              </div>
+            </details>
+          </section>
         </div>
         <div class="form-error" id="settings-error" role="alert" hidden></div>
         <div class="modal-actions">
@@ -232,6 +267,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
-    <script type="module" src="/app.js?v=2.0.0"></script>
+    <script type="module" src="/app.js?v=2.1.0"></script>
   </body>
 </html>

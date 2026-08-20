@@ -22,7 +22,7 @@ function cleanList(value, maxItems = 20) {
 function cleanUrl(value) {
   const candidate = cleanText(value, 2000);
   if (!candidate) return null;
-  if (/^\/api\/covers\/(?:97[89]\d{10}|\d{9}[\dX])\.(?:jpg|png|webp|avif)$/i.test(candidate)) return candidate;
+  if (/^\/api\/covers\/(?:(?:97[89]\d{10}|\d{9}[\dX])|custom-[a-f0-9-]{36})\.(?:jpg|png|webp|avif)$/i.test(candidate)) return candidate;
   try {
     const url = new URL(candidate);
     if (!["http:", "https:"].includes(url.protocol)) throw new Error();
@@ -45,6 +45,17 @@ export function validateBook(input = {}) {
   const ratingValue = input.rating === "" || input.rating == null ? null : Number(input.rating);
   if (ratingValue != null && (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5)) {
     throw new ValidationError("Rating must be between 1 and 5.");
+  }
+
+  const bookRating = input.bookRating === "" || input.bookRating == null ? null : Number(input.bookRating);
+  if (bookRating != null && (!Number.isFinite(bookRating) || bookRating < 1 || bookRating > 5)) {
+    throw new ValidationError("Book rating must be between 1 and 5.");
+  }
+  const bookRatingsCount = input.bookRatingsCount === "" || input.bookRatingsCount == null
+    ? null
+    : Number(input.bookRatingsCount);
+  if (bookRatingsCount != null && (!Number.isInteger(bookRatingsCount) || bookRatingsCount < 0)) {
+    throw new ValidationError("Book rating count must be a positive whole number.");
   }
 
   const pageCount = input.pageCount === "" || input.pageCount == null ? null : Number(input.pageCount);
@@ -70,6 +81,9 @@ export function validateBook(input = {}) {
     language: cleanText(input.language, 30),
     readingStatus,
     rating: ratingValue,
+    bookRating,
+    bookRatingsCount,
+    bookRatingSource: cleanText(input.bookRatingSource, 100),
     notes: cleanText(input.notes, 20000),
     metadataSource: cleanText(input.metadataSource, 100),
   };

@@ -6,7 +6,7 @@ import path from "node:path";
 import { cacheBookCover, coverCacheState, resolveCoverFile } from "../src/covers.js";
 
 test("downloads an approved cover into persistent storage", async () => {
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jnc-covers-"));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-covers-"));
   try {
     const fetchImpl = async (url) => {
       assert.equal(url.hostname, "covers.openlibrary.org");
@@ -29,7 +29,7 @@ test("downloads an approved cover into persistent storage", async () => {
 });
 
 test("does not fetch cover URLs from unapproved hosts", async () => {
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jnc-covers-"));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-covers-"));
   try {
     const result = await cacheBookCover({
       isbn: "9781399745413",
