@@ -34,11 +34,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "JnC Bookshelf",
-      version: "1.4.0",
+      version: "1.4.1",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.4.0");
+    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.4.1");
 
     const response = await fetch(`${baseUrl}/api/books?sort=title&order=asc`);
     assert.equal(response.status, 200);
@@ -54,15 +54,15 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=1\.4\.0/);
+    assert.match(html, /styles\.css\?v=1\.4\.1/);
     assert.match(html, /capture="environment"/);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.4.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.4.1`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     assert.match(await stylesheet.text(), /\.site-header/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=1.4.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=1.4.1`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     assert.match(await script.text(), /scanBarcodePhoto/);

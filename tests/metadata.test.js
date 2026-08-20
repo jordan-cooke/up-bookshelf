@@ -61,6 +61,7 @@ test("merges providers so richer descriptions and cover choices are retained", (
       description: "A richer synopsis.",
       coverUrl: "https://books.google.com/cover.jpg",
       coverCandidates: ["https://books.google.com/cover.jpg"],
+      preferredCoverCandidates: [],
       categories: ["Fantasy"],
       metadataSource: "Google Books",
     },
@@ -70,6 +71,7 @@ test("merges providers so richer descriptions and cover choices are retained", (
       description: "",
       coverUrl: "https://covers.openlibrary.org/cover.jpg",
       coverCandidates: ["https://covers.openlibrary.org/cover.jpg"],
+      preferredCoverCandidates: ["https://covers.openlibrary.org/cover.jpg"],
       categories: ["Alternate Worlds"],
       metadataSource: "Open Library",
     },
@@ -79,5 +81,6 @@ test("merges providers so richer descriptions and cover choices are retained", (
   assert.equal(result.publisher, "Hodder & Stoughton");
   assert.deepEqual(result.categories, ["Fantasy", "Alternate Worlds"]);
   assert.equal(result.coverCandidates.length, 2);
+  assert.equal(result.coverUrl, "https://covers.openlibrary.org/cover.jpg");
   assert.equal(result.metadataSource, "Google Books + Open Library");
 });

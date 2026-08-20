@@ -36,6 +36,10 @@ function googleCoverCandidates(imageLinks = {}) {
   ].map(httpsUrl));
 }
 
+function googlePreferredCoverCandidates(imageLinks = {}) {
+  return unique([imageLinks.extraLarge, imageLinks.large].map(httpsUrl));
+}
+
 function openLibraryCoverCandidates(book = {}, edition = {}, work = {}) {
   const coverIds = unique([...(edition.covers || []), ...(work.covers || [])]);
   return unique([
@@ -55,6 +59,7 @@ export function normalizeGoogleBook(payload, requestedIsbn) {
   const isbn13 = identifiers.find((item) => item.type === "ISBN_13")?.identifier;
   const isbn10 = identifiers.find((item) => item.type === "ISBN_10")?.identifier;
   const coverCandidates = googleCoverCandidates(volume.imageLinks);
+  const preferredCoverCandidates = googlePreferredCoverCandidates(volume.imageLinks);
 
   return {
     title: volume.title || "",
@@ -69,6 +74,7 @@ export function normalizeGoogleBook(payload, requestedIsbn) {
     categories: volume.categories || [],
     coverUrl: coverCandidates[0] || null,
     coverCandidates,
+    preferredCoverCandidates,
     language: volume.language || "",
     metadataSource: "Google Books",
   };
@@ -81,6 +87,9 @@ export function normalizeOpenLibraryBook(payload, requestedIsbn, edition = {}, w
 
   const classified = classifyIsbn(requestedIsbn);
   const coverCandidates = openLibraryCoverCandidates(book, edition, work);
+  const preferredCoverCandidates = unique((edition.covers || []).map(
+    (coverId) => `https://covers.openlibrary.org/b/id/${coverId}.jpg?default=false`,
+  ));
   const languageKey = edition.languages?.[0]?.key || "";
   const subjects = book?.subjects?.map((subject) => subject.name).filter(Boolean)
     || work.subjects?.filter((subject) => typeof subject === "string")
@@ -101,6 +110,7 @@ export function normalizeOpenLibraryBook(payload, requestedIsbn, edition = {}, w
     categories: subjects.slice(0, 8),
     coverUrl: coverCandidates[0] || null,
     coverCandidates,
+    preferredCoverCandidates,
     language: languageKey.split("/").pop() || "",
     metadataSource: "Open Library",
   };
@@ -115,7 +125,15 @@ export function mergeBookMetadata(primary, fallback) {
   for (const field of scalarFields) merged[field] = primary[field] || fallback[field] || (field === "pageCount" ? null : "");
   merged.authors = primary.authors?.length ? primary.authors : fallback.authors || [];
   merged.categories = unique([...(primary.categories || []), ...(fallback.categories || [])]).slice(0, 8);
-  merged.coverCandidates = unique([...(primary.coverCandidates || []), ...(fallback.coverCandidates || [])]);
+  merged.preferredCoverCandidates = unique([
+    ...(primary.preferredCoverCandidates || []),
+    ...(fallback.preferredCoverCandidates || []),
+  ]);
+  merged.coverCandidates = unique([
+    ...merged.preferredCoverCandidates,
+    ...(primary.coverCandidates || []),
+    ...(fallback.coverCandidates || []),
+  ]);
   merged.coverUrl = merged.coverCandidates[0] || primary.coverUrl || fallback.coverUrl || null;
   merged.metadataSource = unique([primary.metadataSource, fallback.metadataSource]).join(" + ");
   return merged;

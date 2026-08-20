@@ -140,7 +140,7 @@ Replacing the container does not remove the library: the SQLite database remains
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 1.4.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.4.0","storage":"sqlite","authentication":false}`. It automatically looks up a valid ISBN through Google Books and Open Library, follows Open Library work records for richer descriptions, and caches the first valid cover under `/data/covers`. The scanner accepts Bookland ISBN barcodes beginning with `978` or `979` and rejects unrelated retail/product barcodes instead of opening an empty form. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
+Release 1.4.1 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.4.1","storage":"sqlite","authentication":false}`. It automatically looks up a valid ISBN through Google Books and Open Library, follows Open Library work records for richer descriptions, and caches the best high-resolution cover under `/data/covers`. The scanner accepts Bookland ISBN barcodes beginning with `978` or `979` and rejects unrelated retail/product barcodes instead of opening an empty form. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
 
 Useful commands:
 

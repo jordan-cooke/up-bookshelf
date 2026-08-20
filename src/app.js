@@ -19,7 +19,7 @@ import {
 import { validateBook, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "1.4.0";
+export const APP_VERSION = "1.4.1";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
 function numericId(request, response, next) {
@@ -133,6 +133,7 @@ export function createApp({ database, lookup = lookupBookByIsbn, trustProxy = fa
       const coverCandidates = book.coverCandidates?.length ? book.coverCandidates : [book.coverUrl].filter(Boolean);
       const cachedCover = await cacheBookCover({ isbn, candidates: coverCandidates, directory: coverDirectory });
       delete book.coverCandidates;
+      delete book.preferredCoverCandidates;
       if (cachedCover) book.coverUrl = cachedCover;
       return response.json({ existing: null, book });
     } catch (error) {
