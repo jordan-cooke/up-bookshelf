@@ -14,13 +14,12 @@ A private, self-hosted home library designed for a phone. Scan the ISBN barcode 
 - Stores ratings and private notes
 - Exports the collection as JSON
 - Installs to a phone home screen as a PWA
-- Supports an optional app password
 
-The browser sends ISBNs to the two metadata providers, but the library, ratings, and notes stay in a private SQLite database on your Unraid server.
+Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, and embedded SQLite support. No separate database container is required. The server makes outbound requests to Google Books and Open Library when it looks up an ISBN, but the library, ratings, and notes stay in the SQLite database on your Unraid server.
 
 ## Unraid quick start
 
-The included Compose stack builds one self-contained app image with an embedded SQLite database. A typical Unraid installation uses the **Compose Manager** plugin from Community Applications, but the same commands work from an Unraid terminal with Docker Compose installed.
+The simplest Unraid deployment uses Docker directly and does not require Compose.
 
 1. Open the Unraid terminal and clone the Gitea repository into appdata:
 
@@ -32,45 +31,34 @@ The included Compose stack builds one self-contained app image with an embedded 
 
    If the repository is private, Git will prompt for the Gitea username and a personal access token. If Git is unavailable on Unraid, download the repository ZIP from Gitea and extract it to `/mnt/user/appdata/jnc-bookshelf` instead.
 
-2. Create the environment file:
+2. Create the persistent data directory, build the image, and start the container:
 
    ```bash
-   cp .env.example .env
-   nano .env
+   mkdir -p /mnt/user/appdata/jnc-bookshelf/data
+   docker build --no-cache -t jnc-bookshelf:latest .
+   docker run -d \
+     --name jnc-bookshelf \
+     --restart unless-stopped \
+     -p 3080:3000 \
+     -v /mnt/user/appdata/jnc-bookshelf/data:/data \
+     jnc-bookshelf:latest
    ```
 
-3. Point the persistent data directory at Unraid appdata and optionally set an app password:
-
-   ```dotenv
-   APP_PORT=3080
-   APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data
-
-   # Optional login for the web app
-   APP_USERNAME=jnc
-   APP_PASSWORD=
-
-   # Set to 1 after configuring a trusted HTTPS reverse proxy
-   TRUST_PROXY=0
-   ```
-
-4. Start the stack from Compose Manager, or run:
-
-   ```bash
-   cd /mnt/user/appdata/jnc-bookshelf
-   docker compose up -d --build
-   ```
-
-5. On your home network, open:
+3. On your home network, open:
 
    ```text
    http://YOUR-UNRAID-IP:3080
    ```
 
-The first start can take a minute while the app image builds. The app automatically creates `/mnt/user/appdata/jnc-bookshelf/data/bookshelf.sqlite`; that file remains in place across container updates.
+The first build can take a minute. The app automatically creates `/mnt/user/appdata/jnc-bookshelf/data/bookshelf.sqlite`; that file remains in place across container replacements and updates. No username or password is required on the local network.
+
+The included `compose.yaml` is optional for users with Compose Manager. Copy `.env.example` to `.env`, set `APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data`, and run `docker compose up -d --build`.
 
 ## HTTPS and phone camera access
 
-Mobile browsers require a **trusted HTTPS connection** for live camera access. Plain `http://192.168...` access can still use the scanner's photo option (including taking a new photo) and manual ISBN entry, but not the live viewfinder.
+The primary **Scan a book** action opens the phone camera or photo picker and reads the ISBN from the resulting picture. This works on a normal local address such as `http://10.1.10.221:3080` and does not require HTTPS.
+
+Mobile browsers require a **trusted HTTPS connection** only for the optional live viewfinder. When the app detects HTTPS, it also offers **Use live scanner**.
 
 For live scanning, put the app behind your existing HTTPS reverse proxy, such as Nginx Proxy Manager or SWAG, and use a certificate trusted by the phone. Proxy the HTTPS hostname to:
 
@@ -84,11 +72,11 @@ Then set this in `.env` and recreate the app container:
 TRUST_PROXY=1
 ```
 
-Do not expose port 3080 directly to the public internet. If `APP_PASSWORD` is enabled, always use HTTPS—the browser's Basic Auth prompt protects casual access, but HTTPS provides the encryption.
+Do not expose port 3080 directly to the public internet. The app intentionally has no login because it is designed for a trusted home network.
 
 ## Add it to her phone
 
-After opening the HTTPS address:
+After opening the local address (or an HTTPS address, if configured):
 
 - **iPhone/iPad:** Safari → Share → Add to Home Screen
 - **Android:** Chrome → menu → Install app or Add to Home screen
@@ -126,7 +114,6 @@ docker run -d \
   --name jnc-bookshelf \
   --restart unless-stopped \
   -p 3080:3000 \
-  --env-file .env \
   -e DB_PATH=/data/bookshelf.sqlite \
   -v /mnt/user/appdata/jnc-bookshelf/data:/data \
   jnc-bookshelf:latest
@@ -138,7 +125,7 @@ Replacing the container does not remove the library: the SQLite database remains
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 1.1.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.1.0"}`. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it; the app shell now bypasses stale caches during upgrades.
+Release 1.2.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.2.0","storage":"sqlite","authentication":false}`. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
 
 Useful commands:
 

@@ -1,7 +1,10 @@
-node_modules
-npm-debug.log
 .git
 .env
-coverage
-tests
 data
+tmp
+node_modules
+tests
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.zip

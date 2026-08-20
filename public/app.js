@@ -6,10 +6,16 @@ const elements = {
   status: document.querySelector("#status-filter"),
   sort: document.querySelector("#sort"),
   scannerDialog: document.querySelector("#scanner-dialog"),
+  scanActions: document.querySelector("#scan-actions"),
+  scannerShell: document.querySelector("#scanner-shell"),
   scannerReader: document.querySelector("#scanner-reader"),
+  photoScanButton: document.querySelector("#photo-scan-button"),
+  barcodePhoto: document.querySelector("#barcode-photo"),
+  liveScanButton: document.querySelector("#live-scan-button"),
   isbnForm: document.querySelector("#isbn-form"),
   isbnInput: document.querySelector("#isbn-input"),
   lookupProgress: document.querySelector("#lookup-progress"),
+  lookupProgressLabel: document.querySelector("#lookup-progress-label"),
   bookDialog: document.querySelector("#book-dialog"),
   bookForm: document.querySelector("#book-form"),
   formError: document.querySelector("#form-error"),
@@ -127,19 +133,29 @@ function closeScanner() {
     scanner = null;
   }
   scanLocked = false;
+  elements.scannerReader.replaceChildren();
   if (elements.scannerDialog.open) elements.scannerDialog.close();
 }
 
 function openScanner() {
   elements.isbnInput.value = "";
+  elements.barcodePhoto.value = "";
+  elements.scanActions.hidden = false;
+  elements.scannerShell.hidden = true;
   elements.lookupProgress.hidden = true;
+  elements.lookupProgressLabel.textContent = "Looking up that book…";
+  elements.liveScanButton.hidden = !window.isSecureContext;
   elements.scannerDialog.showModal();
+}
 
+function startLiveScanner() {
   if (!window.Html5QrcodeScanner) {
     toast("The scanner could not load. Enter the ISBN manually.", "error");
     return;
   }
 
+  elements.scanActions.hidden = true;
+  elements.scannerShell.hidden = false;
   scanner = new Html5QrcodeScanner(
     "scanner-reader",
     {
@@ -153,6 +169,34 @@ function openScanner() {
     false,
   );
   scanner.render((decodedText) => lookupIsbn(decodedText), () => {});
+}
+
+async function scanBarcodePhoto(file) {
+  if (!file) return;
+  if (!window.Html5Qrcode) {
+    toast("The barcode reader could not load. Enter the ISBN manually.", "error");
+    return;
+  }
+
+  elements.scanActions.hidden = true;
+  elements.scannerShell.hidden = false;
+  elements.lookupProgress.hidden = false;
+  elements.lookupProgressLabel.textContent = "Reading the barcode…";
+  scanner = new Html5Qrcode("scanner-reader");
+  try {
+    const decodedText = await scanner.scanFile(file, true);
+    await scanner.clear().catch(() => {});
+    scanner = null;
+    elements.lookupProgress.hidden = true;
+    await lookupIsbn(decodedText);
+  } catch {
+    await scanner?.clear().catch(() => {});
+    scanner = null;
+    elements.scanActions.hidden = false;
+    elements.scannerShell.hidden = true;
+    elements.lookupProgress.hidden = true;
+    toast("We couldn’t read an ISBN barcode in that photo. Try again closer and in good light.", "error");
+  }
 }
 
 async function lookupIsbn(rawValue) {
@@ -309,6 +353,9 @@ elements.isbnForm.addEventListener("submit", (event) => {
   event.preventDefault();
   lookupIsbn(elements.isbnInput.value);
 });
+elements.photoScanButton.addEventListener("click", () => elements.barcodePhoto.click());
+elements.barcodePhoto.addEventListener("change", () => scanBarcodePhoto(elements.barcodePhoto.files?.[0]));
+elements.liveScanButton.addEventListener("click", startLiveScanner);
 elements.bookForm.addEventListener("submit", saveBook);
 elements.deleteBook.addEventListener("click", removeBook);
 elements.bookForm.elements.coverUrl.addEventListener("input", updateCoverPreview);
@@ -329,7 +376,6 @@ elements.bookDialog.addEventListener("click", (event) => {
   if (event.target === elements.bookDialog) elements.bookDialog.close();
 });
 
-if (!window.isSecureContext) document.querySelector("#camera-notice").hidden = false;
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});
 
 Promise.all([loadBooks(), loadStats()]);

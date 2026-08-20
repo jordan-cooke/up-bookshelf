@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -18,30 +18,8 @@ import {
 import { validateBook, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "1.1.0";
-
-function secureCompare(actual, expected) {
-  const actualBuffer = Buffer.from(actual);
-  const expectedBuffer = Buffer.from(expected);
-  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
-}
-
-function optionalBasicAuth(password, expectedUsername) {
-  return (request, response, next) => {
-    if (!password || request.path === "/api/health") return next();
-    const [scheme, token] = (request.headers.authorization || "").split(" ");
-    if (scheme === "Basic" && token) {
-      try {
-        const [username, suppliedPassword] = Buffer.from(token, "base64").toString().split(":");
-        if (username === expectedUsername && secureCompare(suppliedPassword || "", password)) return next();
-      } catch {
-        // Fall through to the authentication prompt.
-      }
-    }
-    response.set("WWW-Authenticate", 'Basic realm="JnC Bookshelf", charset="UTF-8"');
-    return response.status(401).send("Authentication required");
-  };
-}
+export const APP_VERSION = "1.2.0";
+const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
 function numericId(request, response, next) {
   const id = Number(request.params.id);
@@ -50,7 +28,7 @@ function numericId(request, response, next) {
   return next();
 }
 
-export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "jnc", appPassword = "", trustProxy = false }) {
+export function createApp({ database, lookup = lookupBookByIsbn, trustProxy = false }) {
   const app = express();
   if (trustProxy) app.set("trust proxy", 1);
 
@@ -73,13 +51,14 @@ export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "
       },
     }),
   );
-  app.use(optionalBasicAuth(appPassword, appUsername));
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/api/health", async (_request, response, next) => {
     try {
       database.prepare("SELECT 1").get();
-      response.json({ status: "ok", app: "JnC Bookshelf", version: APP_VERSION });
+      const missingAssets = REQUIRED_ASSETS.filter((file) => !fs.existsSync(path.join(ROOT, "public", file)));
+      if (missingAssets.length) return response.status(503).json({ status: "error", error: "App assets are missing.", missingAssets });
+      response.json({ status: "ok", app: "JnC Bookshelf", version: APP_VERSION, storage: "sqlite", authentication: false });
     } catch (error) {
       next(error);
     }
@@ -183,6 +162,7 @@ export function createApp({ database, lookup = lookupBookByIsbn, appUsername = "
       },
     }),
   );
+  app.get(/^\/.*\.(?:css|js|svg|png|webmanifest)$/i, (_request, response) => response.status(404).send("Asset not found"));
   app.get("/{*path}", (_request, response) => {
     response.set("Cache-Control", "no-store");
     response.sendFile(path.join(ROOT, "public", "index.html"));

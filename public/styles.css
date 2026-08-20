@@ -18,6 +18,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html { scroll-behavior: smooth; }
 
@@ -193,6 +194,27 @@ dialog::backdrop { background: rgb(25 34 30 / 60%); backdrop-filter: blur(3px); 
 .close-button { display: grid; width: 39px; min-width: 39px; height: 39px; place-items: center; padding: 0 0 .15rem; border: 1px solid var(--border); border-radius: 50%; background: transparent; font-size: 1.8rem; line-height: 1; }
 .close-button:hover { background: var(--paper); }
 .modal-intro { margin: .8rem 1.6rem 1.2rem; color: var(--muted); line-height: 1.55; }
+.scan-actions { display: grid; margin: 0 1.6rem 1.3rem; gap: .75rem; }
+.photo-scan-button {
+  display: flex;
+  width: 100%;
+  min-height: 108px;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid rgb(49 92 73 / 25%);
+  border-radius: 16px;
+  color: var(--ink);
+  background: linear-gradient(135deg, var(--green-soft), #edf3ee);
+  text-align: left;
+}
+.photo-scan-button:hover { border-color: var(--green); background: #e7f0e9; }
+.photo-scan-button > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: .3rem; }
+.photo-scan-button strong { color: var(--green-dark); font-family: var(--serif); font-size: 1.25rem; font-weight: 600; }
+.photo-scan-button small { color: var(--muted); font-size: .82rem; line-height: 1.4; }
+.camera-disc { display: grid; width: 58px; min-width: 58px; height: 58px; place-items: center; border-radius: 50%; color: #fff; background: var(--green); box-shadow: 0 8px 18px rgb(49 92 73 / 20%); }
+.camera-disc svg { width: 29px; height: 29px; }
+.live-scan-button { width: 100%; }
 .scanner-shell { min-height: 270px; margin: 0 1.6rem; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: #202a25; color: var(--ink); }
 #scanner-reader { padding: .7rem !important; }
 #scanner-reader video { border-radius: 10px; object-fit: cover; }
@@ -263,6 +285,7 @@ dialog::backdrop { background: rgb(25 34 30 / 60%); backdrop-filter: blur(3px); 
   .modal-header { padding: 1.2rem 1rem 0; }
   .modal-intro { margin-right: 1rem; margin-left: 1rem; }
   .scanner-shell { margin-right: 1rem; margin-left: 1rem; }
+  .scan-actions { margin-right: 1rem; margin-left: 1rem; }
   .manual-isbn { margin-right: 1rem; margin-left: 1rem; }
   .form-layout { padding: 1.2rem 1rem; }
   .form-fields { grid-template-columns: 1fr; }
