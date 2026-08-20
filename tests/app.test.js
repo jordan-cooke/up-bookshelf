@@ -34,11 +34,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.3.0",
+      version: "2.3.1",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.3.0");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.3.1");
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -58,7 +58,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.3\.0/);
+    assert.match(html, /styles\.css\?v=2\.3\.1/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
@@ -78,7 +78,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(html, />Book rating</);
     assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.3.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.3.1`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     const css = await stylesheet.text();
@@ -86,12 +86,13 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(css, /\.tagline-hidden \.hero/);
     assert.match(css, /\.metadata-result-grid/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.3.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.3.1`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     const javascript = await script.text();
     assert.match(javascript, /scanBarcodePhoto/);
     assert.match(javascript, /resumeContinuousScanning/);
+    assert.match(javascript, /displayCoverUrl/);
 
     const icon = await fetch(`${baseUrl}/icon.svg`);
     assert.equal(icon.status, 200);
@@ -252,6 +253,14 @@ test("stores and tests provider credentials without returning their values to th
     assert.equal((await cookieTest.json()).count, 3);
     assert.match(testedCookieOptions.amazonCookie, /test-cookie-secret/);
 
+    const bareSession = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amazonCookie: "137-6947552-3046636" }),
+    });
+    assert.equal(bareSession.status, 200);
+    assert.equal(database.prepare("SELECT value FROM app_settings WHERE key = 'amazon_cookie'").get().value, "session-id=137-6947552-3046636");
+
     const removed = await fetch(`${baseUrl}/api/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -338,6 +347,22 @@ test("serves cached covers from the persistent data directory", async () => {
   } finally {
     await fs.promises.rm(coverDirectory, { recursive: true, force: true });
   }
+});
+
+test("serves provider cover previews through the same origin", async () => {
+  const loadProviderCover = async ({ value }) => {
+    assert.equal(value, "https://covers.openlibrary.org/b/id/15107046-L.jpg");
+    return { bytes: Buffer.alloc(2048, 3), contentType: "image/jpeg" };
+  };
+  await withServer({ loadProviderCover }, async (baseUrl) => {
+    const source = "https://covers.openlibrary.org/b/id/15107046-L.jpg";
+    const cover = await fetch(`${baseUrl}/api/covers/preview?url=${encodeURIComponent(source)}`);
+    assert.equal(cover.status, 200);
+    assert.equal(cover.headers.get("content-type"), "image/jpeg");
+    assert.match(cover.headers.get("cache-control"), /max-age=86400/);
+    assert.equal((await cover.arrayBuffer()).byteLength, 2048);
+    assert.equal((await fetch(`${baseUrl}/api/covers/preview`)).status, 400);
+  });
 });
 
 test("uploads a custom cover into persistent storage", async () => {

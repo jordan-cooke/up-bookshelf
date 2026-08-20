@@ -3,7 +3,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { cacheBookCover, coverCacheState, resolveCoverFile } from "../src/covers.js";
+import { cacheBookCover, coverCacheState, fetchProviderCover, resolveCoverFile } from "../src/covers.js";
+
+test("fetches an approved provider cover for same-origin previews", async () => {
+  const cover = await fetchProviderCover({
+    value: "https://covers.openlibrary.org/b/id/15107046-L.jpg",
+    fetchImpl: async (url, options) => {
+      assert.equal(url.hostname, "covers.openlibrary.org");
+      assert.equal(url.searchParams.get("default"), "false");
+      assert.match(options.headers.Accept, /image\/jpeg/);
+      return new Response(Buffer.alloc(2048, 4), { status: 200, headers: { "Content-Type": "image/jpeg" } });
+    },
+  });
+  assert.equal(cover.contentType, "image/jpeg");
+  assert.equal(cover.bytes.length, 2048);
+});
 
 test("downloads an approved cover into persistent storage", async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-covers-"));

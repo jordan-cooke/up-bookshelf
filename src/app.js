@@ -5,7 +5,7 @@ import express from "express";
 import helmet from "helmet";
 import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
 import { checkAmazonCookie, isSupportedAmazonMarketplace, lookupBookMetadata, searchBookMetadata } from "./metadata.js";
-import { cacheBookCover, coverCacheState, saveUploadedCover } from "./covers.js";
+import { cacheBookCover, coverCacheState, fetchProviderCover, saveUploadedCover } from "./covers.js";
 import {
   createBook,
   deleteAppSettings,
@@ -23,7 +23,7 @@ import {
 import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.3.0";
+export const APP_VERSION = "2.3.1";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
@@ -95,6 +95,7 @@ export function createApp({
   lookup = lookupBookMetadata,
   searchMetadata = searchBookMetadata,
   testAmazonCookie = checkAmazonCookie,
+  loadProviderCover = fetchProviderCover,
   trustProxy = false,
   coverDirectory = null,
 }) {
@@ -196,7 +197,8 @@ export function createApp({
 
       if (request.body?.removeAmazonCookie) keysToDelete.push("amazon_cookie");
       else {
-        const amazonCookie = String(request.body?.amazonCookie || "").trim().replace(/^cookie:\s*/i, "");
+        let amazonCookie = String(request.body?.amazonCookie || "").trim().replace(/^cookie:\s*/i, "");
+        if (/^\d{3}-\d{7}-\d{7}$/.test(amazonCookie)) amazonCookie = `session-id=${amazonCookie}`;
         if (amazonCookie.length > 32768) return response.status(400).json({ error: "The Amazon cookie header is too long." });
         if (/[\r\n\u0000-\u001f\u007f]/.test(amazonCookie)) return response.status(400).json({ error: "The Amazon cookie header contains invalid characters." });
         if (amazonCookie && !amazonCookie.includes("=")) return response.status(400).json({ error: "Paste the full Cookie request header from Amazon." });
@@ -366,6 +368,20 @@ export function createApp({
       const coverUrl = await saveUploadedCover({ bytes: request.body, directory: coverDirectory });
       if (!coverUrl) return response.status(400).json({ error: "Upload a valid JPEG cover image smaller than 8 MB." });
       return response.status(201).json({ coverUrl });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get("/api/covers/preview", async (request, response, next) => {
+    try {
+      const value = String(request.query.url || "");
+      if (!value || value.length > 4096) return response.status(400).send("Invalid cover URL");
+      const cover = await loadProviderCover({ value });
+      if (!cover) return response.status(404).send("Cover unavailable");
+      response.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      response.type(cover.contentType);
+      return response.send(cover.bytes);
     } catch (error) {
       return next(error);
     }

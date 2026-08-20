@@ -45,6 +45,31 @@ function cachedCoverPath(directory, isbn) {
   return null;
 }
 
+export async function fetchProviderCover({ value, fetchImpl = fetch }) {
+  const url = permittedCoverUrl(value);
+  if (!url) return null;
+
+  try {
+    const response = await fetchImpl(url, {
+      headers: { "User-Agent": "UPBookshelf/2.3", Accept: "image/avif,image/webp,image/png,image/jpeg" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(12000),
+    });
+    if (response.url && !permittedCoverUrl(response.url)) return null;
+    const contentType = response.headers.get("content-type")?.split(";")[0].toLowerCase();
+    const extension = CONTENT_TYPES.get(contentType);
+    const declaredLength = Number(response.headers.get("content-length") || 0);
+    if (!response.ok || !extension || declaredLength > MAX_COVER_BYTES) return null;
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length < 1024 || bytes.length > MAX_COVER_BYTES) return null;
+    return { bytes, contentType, extension, url };
+  } catch (error) {
+    console.warn(`Cover download failed for ${url.hostname}:`, error.message);
+    return null;
+  }
+}
+
 export function publicCoverPath(filePath) {
   return `/api/covers/${path.basename(filePath)}`;
 }
@@ -84,24 +109,11 @@ export async function cacheBookCover({ isbn, candidates = [], directory, fetchIm
   await fs.promises.mkdir(directory, { recursive: true });
 
   for (const candidate of [...new Set(candidates.filter(Boolean))]) {
-    const url = permittedCoverUrl(candidate);
-    if (!url) continue;
+    const downloaded = await fetchProviderCover({ value: candidate, fetchImpl });
+    if (!downloaded) continue;
+    const { bytes, extension, url } = downloaded;
 
     try {
-      const response = await fetchImpl(url, {
-        headers: { "User-Agent": "UPBookshelf/2.0" },
-        redirect: "follow",
-        signal: AbortSignal.timeout(12000),
-      });
-      if (response.url && !permittedCoverUrl(response.url)) continue;
-      const contentType = response.headers.get("content-type")?.split(";")[0].toLowerCase();
-      const extension = CONTENT_TYPES.get(contentType);
-      const declaredLength = Number(response.headers.get("content-length") || 0);
-      if (!response.ok || !extension || declaredLength > MAX_COVER_BYTES) continue;
-
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length < 1024 || bytes.length > MAX_COVER_BYTES) continue;
-
       const filePath = path.join(directory, `${isbn}.${extension}`);
       const temporaryPath = path.join(directory, `.${isbn}-${process.pid}-${Date.now()}.tmp`);
       try {
@@ -114,7 +126,7 @@ export async function cacheBookCover({ isbn, candidates = [], directory, fetchIm
       }
       return publicCoverPath(filePath);
     } catch (error) {
-      console.warn(`Cover download failed for ${url.hostname}:`, error.message);
+      console.warn(`Cover save failed for ${url.hostname}:`, error.message);
     }
   }
 

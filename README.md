@@ -95,7 +95,7 @@ To configure it from a desktop browser:
 3. Select the main Amazon document request and copy the complete combined **Cookie** request-header value—not one individual cookie.
 4. In UP Bookshelf, open **Settings → Book information providers → Amazon → Session cookie**, choose the same marketplace, paste the value, and save.
 
-After saving, the password-style field deliberately becomes blank. A **Cookie saved** notice confirms that it remains stored, and **Test saved cookie** performs a live Amazon search so an expired or unusable session can be identified immediately.
+After saving, the password-style field deliberately becomes blank. A **Cookie saved** notice confirms that it remains stored, and **Test saved cookie** performs a live Amazon search so an expired or unusable session can be identified immediately. You may paste either the complete Cookie header or the bare Amazon session ID (for example, `137-1234567-1234567`); a bare ID is automatically stored as `session-id=…`.
 
 Treat this value like a password. It is stored server-side in the mounted SQLite database, never sent back to the browser, and never included in exports. Anyone with access to the appdata database may still be able to read it, so protect appdata backups and do not publish the database. The cookie method follows the same practical precautions documented by [Grimmory](https://grimmory.org/docs/metadata/amazon-cookie/).
 
@@ -178,7 +178,7 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.3.0 makes saved Amazon cookies unmistakable and testable without exposing their value, and adds a remembered continuous-scan workflow for quickly cataloging large collections. Existing books, covers, settings, and secrets are preserved automatically.
+Release 2.3.1 routes approved provider-cover previews through the Bookshelf server so they display consistently on iPhone over Tailscale HTTPS. It also accepts Grimmory-style bare Amazon session IDs. Release 2.3.0 added verifiable saved-cookie status and continuous scanning. Existing books, covers, settings, and secrets are preserved automatically.
 
 ## Local development
 

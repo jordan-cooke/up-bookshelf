@@ -88,6 +88,12 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+function displayCoverUrl(value = "") {
+  const url = String(value || "").trim();
+  if (!/^https?:\/\//i.test(url)) return url;
+  return `/api/covers/preview?url=${encodeURIComponent(url)}`;
+}
+
 function api(path, options = {}) {
   return fetch(path, {
     ...options,
@@ -258,7 +264,7 @@ async function testSavedAmazonCookie() {
 function bookCard(book) {
   const author = book.authors.length ? book.authors.join(", ") : "Unknown author";
   const cover = book.coverUrl
-    ? `<img src="${escapeHtml(book.coverUrl)}" alt="Cover of ${escapeHtml(book.title)}" loading="lazy" />`
+    ? `<img src="${escapeHtml(displayCoverUrl(book.coverUrl))}" alt="Cover of ${escapeHtml(book.title)}" loading="lazy" />`
     : `<span class="cover-placeholder"><b>${escapeHtml(book.title.slice(0, 1))}</b><small>${escapeHtml(book.title)}</small></span>`;
   const userRating = book.rating ? `<span class="card-rating" aria-label="Your rating: ${book.rating} out of 5 stars"><b>Yours</b> ${"★".repeat(book.rating)}${"☆".repeat(5 - book.rating)}</span>` : "";
   const bookRating = book.bookRating ? `<span class="card-book-rating" aria-label="Book rating: ${book.bookRating} out of 5"><b>Book</b> ${Number(book.bookRating).toFixed(1)} ★</span>` : "";
@@ -594,7 +600,7 @@ function updateCoverPreview() {
   }
   const image = new Image();
   image.alt = `Cover preview for ${title}`;
-  image.src = url;
+  image.src = displayCoverUrl(url);
   image.addEventListener("error", () => {
     elements.coverPreview.innerHTML = "<span>Cover unavailable<br /><small>Choose another provider image</small></span>";
   }, { once: true });
@@ -752,7 +758,7 @@ function renderMetadataResults() {
   elements.metadataResults.innerHTML = `<section class="result-section"><div class="choice-heading"><span class="eyebrow">Search results</span><h3>${metadataResults.length} ${metadataResults.length === 1 ? "edition" : "editions"} found</h3></div><div class="metadata-result-grid">${metadataResults.map((result, index) => {
     const book = result.book;
     const cover = book.coverUrl
-      ? `<img src="${escapeHtml(book.coverUrl)}" alt="Cover of ${escapeHtml(book.title)}" loading="lazy" />`
+      ? `<img src="${escapeHtml(displayCoverUrl(book.coverUrl))}" alt="Cover of ${escapeHtml(book.title)}" loading="lazy" />`
       : `<span class="result-cover-empty">No cover</span>`;
     const description = book.description ? `<p>${escapeHtml(book.description)}</p>` : "";
     const providerLink = /^https:\/\//i.test(book.providerUrl || "")
@@ -833,7 +839,7 @@ function renderMetadataChoices(preferCandidate = false) {
     : 0;
   const coverHtml = coverCatalog.length
     ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">All available covers</span><h3>Choose the artwork you want on your shelf</h3></div><div class="cover-choice-grid">${coverCatalog.map((cover, index) => `
-        <label class="cover-choice"><input type="radio" name="metadata-cover" value="${index}" data-provider="${escapeHtml(cover.provider)}" ${index === Math.max(0, preferredCoverIndex) ? "checked" : ""} /><span><img src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.provider)} cover option" loading="lazy" /><small>${escapeHtml(cover.provider)}</small></span></label>
+        <label class="cover-choice"><input type="radio" name="metadata-cover" value="${index}" data-provider="${escapeHtml(cover.provider)}" ${index === Math.max(0, preferredCoverIndex) ? "checked" : ""} /><span><img src="${escapeHtml(displayCoverUrl(cover.url))}" alt="${escapeHtml(cover.provider)} cover option" loading="lazy" /><small>${escapeHtml(cover.provider)}</small></span></label>
       `).join("")}</div></section>`
     : `<section class="choice-section"><p class="choice-empty">No provider returned a cover for this edition.</p></section>`;
 
