@@ -8,6 +8,13 @@ const CONTENT_TYPES = new Map([
   ["image/avif", "avif"],
 ]);
 const MAX_COVER_BYTES = 8 * 1024 * 1024;
+const AMAZON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isAmazonHostname(hostname) {
+  return hostname === "m.media-amazon.com"
+    || hostname === "images-na.ssl-images-amazon.com"
+    || hostname === "images-eu.ssl-images-amazon.com";
+}
 
 function permittedCoverUrl(value) {
   try {
@@ -16,9 +23,13 @@ function permittedCoverUrl(value) {
     const permitted = hostname === "covers.openlibrary.org"
       || hostname === "books.google.com"
       || hostname === "books.googleusercontent.com"
-      || hostname.endsWith(".googleusercontent.com");
+      || hostname.endsWith(".googleusercontent.com")
+      || isAmazonHostname(hostname);
     if (url.protocol !== "https:" || !permitted) return null;
     if (hostname === "covers.openlibrary.org") url.searchParams.set("default", "false");
+    if (hostname === "books.google.com" || hostname.endsWith(".googleusercontent.com")) {
+      url.searchParams.delete("edge");
+    }
     return url;
   } catch {
     return null;
@@ -37,10 +48,29 @@ export function publicCoverPath(filePath) {
   return `/api/covers/${path.basename(filePath)}`;
 }
 
-export async function cacheBookCover({ isbn, candidates = [], directory, fetchImpl = fetch }) {
+function coverMetadataPath(directory, isbn) {
+  return path.join(directory, `${isbn}.cover.json`);
+}
+
+async function saveCoverMetadata(directory, isbn, provider, choiceIndex = 0) {
+  const metadataPath = coverMetadataPath(directory, isbn);
+  if (provider !== "amazon") {
+    await fs.promises.rm(metadataPath, { force: true });
+    return;
+  }
+  await fs.promises.writeFile(metadataPath, JSON.stringify({ provider, choiceIndex, cachedAt: new Date().toISOString() }));
+}
+
+async function removeOtherCachedCovers(directory, isbn, keepExtension) {
+  await Promise.all([...CONTENT_TYPES.values()].filter((extension) => extension !== keepExtension).map((extension) => (
+    fs.promises.rm(path.join(directory, `${isbn}.${extension}`), { force: true })
+  )));
+}
+
+export async function cacheBookCover({ isbn, candidates = [], directory, fetchImpl = fetch, force = false, providerChoiceIndex = 0 }) {
   if (!directory) return null;
   const existing = cachedCoverPath(directory, isbn);
-  if (existing) return publicCoverPath(existing);
+  if (existing && !force) return publicCoverPath(existing);
   await fs.promises.mkdir(directory, { recursive: true });
 
   for (const candidate of [...new Set(candidates.filter(Boolean))]) {
@@ -49,7 +79,7 @@ export async function cacheBookCover({ isbn, candidates = [], directory, fetchIm
 
     try {
       const response = await fetchImpl(url, {
-        headers: { "User-Agent": "JnCBookshelf/1.4" },
+        headers: { "User-Agent": "UPBookshelf/2.0" },
         redirect: "follow",
         signal: AbortSignal.timeout(12000),
       });
@@ -67,6 +97,8 @@ export async function cacheBookCover({ isbn, candidates = [], directory, fetchIm
       try {
         await fs.promises.writeFile(temporaryPath, bytes, { flag: "wx" });
         await fs.promises.rename(temporaryPath, filePath);
+        if (force) await removeOtherCachedCovers(directory, isbn, extension);
+        await saveCoverMetadata(directory, isbn, isAmazonHostname(url.hostname) ? "amazon" : "other", providerChoiceIndex);
       } finally {
         await fs.promises.rm(temporaryPath, { force: true });
       }
@@ -77,6 +109,29 @@ export async function cacheBookCover({ isbn, candidates = [], directory, fetchIm
   }
 
   return null;
+}
+
+export function coverCacheState(directory, filename) {
+  const filePath = resolveCoverFile(directory, filename);
+  if (!filePath) return null;
+  const isbn = path.basename(filename, path.extname(filename));
+  try {
+    const metadata = JSON.parse(fs.readFileSync(coverMetadataPath(directory, isbn), "utf8"));
+    if (metadata.provider === "amazon") {
+      const ageMs = Math.max(0, Date.now() - Date.parse(metadata.cachedAt));
+      return {
+        filePath,
+        isbn,
+        provider: "amazon",
+        choiceIndex: Number.isInteger(metadata.choiceIndex) ? metadata.choiceIndex : 0,
+        expired: !Number.isFinite(ageMs) || ageMs >= AMAZON_CACHE_TTL_MS,
+        maxAge: Math.max(0, Math.floor((AMAZON_CACHE_TTL_MS - ageMs) / 1000)),
+      };
+    }
+  } catch {
+    // Covers saved before provider metadata existed are ordinary local covers.
+  }
+  return { filePath, isbn, provider: "other", expired: false, maxAge: 31536000 };
 }
 
 export function resolveCoverFile(directory, filename) {

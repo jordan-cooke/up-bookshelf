@@ -5,10 +5,23 @@ const elements = {
   search: document.querySelector("#search"),
   status: document.querySelector("#status-filter"),
   sort: document.querySelector("#sort"),
+  brandName: document.querySelector("#brand-name"),
+  brandLink: document.querySelector(".brand"),
+  welcomeTitle: document.querySelector("#welcome-title"),
+  settingsButton: document.querySelector("#settings-button"),
+  settingsDialog: document.querySelector("#settings-dialog"),
+  settingsForm: document.querySelector("#settings-form"),
+  settingsError: document.querySelector("#settings-error"),
+  saveSettings: document.querySelector("#save-settings"),
+  themeToggle: document.querySelector("#theme-toggle"),
   scannerDialog: document.querySelector("#scanner-dialog"),
   scanActions: document.querySelector("#scan-actions"),
   scannerShell: document.querySelector("#scanner-shell"),
   scannerReader: document.querySelector("#scanner-reader"),
+  cameraSettings: document.querySelector("#camera-settings"),
+  cameraSelect: document.querySelector("#camera-select"),
+  torchButton: document.querySelector("#torch-button"),
+  torchLabel: document.querySelector("#torch-label"),
   photoScanButton: document.querySelector("#photo-scan-button"),
   barcodePhoto: document.querySelector("#barcode-photo"),
   liveScanButton: document.querySelector("#live-scan-button"),
@@ -22,12 +35,37 @@ const elements = {
   deleteBook: document.querySelector("#delete-book"),
   saveBook: document.querySelector("#save-book"),
   coverPreview: document.querySelector("#cover-preview"),
+  providerToolbar: document.querySelector("#provider-toolbar"),
+  providerSummary: document.querySelector("#provider-summary"),
+  compareMetadata: document.querySelector("#compare-metadata"),
+  metadataDialog: document.querySelector("#metadata-dialog"),
+  providerStatuses: document.querySelector("#provider-statuses"),
+  metadataChoices: document.querySelector("#metadata-choices"),
+  applyMetadata: document.querySelector("#apply-metadata"),
   toastRegion: document.querySelector("#toast-region"),
 };
+
+const METADATA_FIELDS = [
+  ["title", "Title"],
+  ["subtitle", "Subtitle"],
+  ["authors", "Authors"],
+  ["publisher", "Publisher"],
+  ["publishedDate", "Published"],
+  ["pageCount", "Pages"],
+  ["language", "Language"],
+  ["categories", "Genres / subjects"],
+  ["isbn13", "ISBN-13"],
+  ["isbn10", "ISBN-10"],
+];
 
 let scanner = null;
 let searchTimer = null;
 let scanLocked = false;
+let torchEnabled = false;
+let activeProviders = [];
+let metadataCatalog = {};
+let coverCatalog = [];
+let appConfig = { brandName: "UP", appName: "UP Bookshelf", customName: "", tagline: "Every good story,\nright where you left it." };
 
 function escapeHtml(value = "") {
   return String(value)
@@ -60,6 +98,79 @@ function toast(message, kind = "success") {
 
 function statusLabel(status) {
   return { unread: "Want to read", reading: "Reading now", read: "Finished", dnf: "Did not finish" }[status] || status;
+}
+
+function applyTheme(theme, persist = true) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  elements.themeToggle.setAttribute("aria-pressed", String(dark));
+  elements.themeToggle.setAttribute("aria-label", dark ? "Use light mode" : "Use dark mode");
+  elements.themeToggle.title = dark ? "Use light mode" : "Use dark mode";
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#17231e" : "#315c49");
+  if (persist) localStorage.setItem("up-bookshelf-theme", theme);
+}
+
+function initializeTheme() {
+  const stored = localStorage.getItem("up-bookshelf-theme");
+  applyTheme(stored || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"), false);
+}
+
+function renderTagline(tagline) {
+  const lines = String(tagline || "").split("\n");
+  elements.welcomeTitle.replaceChildren();
+  elements.welcomeTitle.hidden = !tagline;
+  if (!tagline) return;
+  elements.welcomeTitle.append(document.createTextNode(lines[0]));
+  for (const line of lines.slice(1)) {
+    elements.welcomeTitle.append(document.createElement("br"));
+    const emphasis = document.createElement("em");
+    emphasis.textContent = line;
+    elements.welcomeTitle.append(emphasis);
+  }
+}
+
+function applyAppConfig(config) {
+  appConfig = config;
+  elements.brandName.textContent = config.brandName;
+  elements.brandLink.setAttribute("aria-label", `${config.appName} home`);
+  document.title = config.appName;
+  renderTagline(config.tagline);
+}
+
+async function loadConfig() {
+  try {
+    const config = await api("/api/config");
+    applyAppConfig(config);
+  } catch {
+    // The default UP brand remains usable if the config call is interrupted.
+  }
+}
+
+function openSettings() {
+  elements.settingsError.hidden = true;
+  elements.settingsForm.elements.name.value = appConfig.customName || "";
+  elements.settingsForm.elements.tagline.value = appConfig.tagline || "";
+  elements.settingsDialog.showModal();
+  setTimeout(() => elements.settingsForm.elements.name.focus(), 50);
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  elements.settingsError.hidden = true;
+  elements.saveSettings.disabled = true;
+  elements.saveSettings.textContent = "Saving…";
+  try {
+    const values = Object.fromEntries(new FormData(elements.settingsForm));
+    applyAppConfig(await api("/api/settings", { method: "PUT", body: JSON.stringify(values) }));
+    elements.settingsDialog.close();
+    toast("Bookshelf settings saved.");
+  } catch (error) {
+    elements.settingsError.textContent = error.message;
+    elements.settingsError.hidden = false;
+  } finally {
+    elements.saveSettings.disabled = false;
+    elements.saveSettings.textContent = "Save settings";
+  }
 }
 
 function bookCard(book) {
@@ -127,14 +238,24 @@ async function loadStats() {
   }
 }
 
-function closeScanner() {
-  if (scanner) {
-    scanner.clear().catch(() => {});
-    scanner = null;
-  }
+async function disposeScanner() {
+  const current = scanner;
+  scanner = null;
+  torchEnabled = false;
+  elements.torchButton.hidden = true;
+  elements.torchButton.setAttribute("aria-pressed", "false");
+  elements.torchButton.classList.remove("is-on");
+  elements.torchLabel.textContent = "Flashlight";
+  if (!current) return;
+  try { await current.stop(); } catch { /* It may be a photo scanner or already stopped. */ }
+  try { current.clear(); } catch { /* The target can already have been cleared. */ }
+}
+
+async function closeScanner() {
   scanLocked = false;
-  elements.scannerReader.replaceChildren();
   if (elements.scannerDialog.open) elements.scannerDialog.close();
+  await disposeScanner();
+  elements.scannerReader.replaceChildren();
 }
 
 function openScanner() {
@@ -142,33 +263,143 @@ function openScanner() {
   elements.barcodePhoto.value = "";
   elements.scanActions.hidden = false;
   elements.scannerShell.hidden = true;
+  elements.cameraSettings.hidden = true;
   elements.lookupProgress.hidden = true;
   elements.lookupProgressLabel.textContent = "Looking up that book…";
   elements.liveScanButton.hidden = !window.isSecureContext;
   elements.scannerDialog.showModal();
 }
 
-function startLiveScanner() {
-  if (!window.Html5QrcodeScanner) {
+function cameraScore(camera) {
+  const label = String(camera.label || "").toLowerCase();
+  let score = /back|rear|environment/.test(label) ? 20 : 0;
+  if (/front|user|facetime/.test(label)) score -= 30;
+  if (/ultra/.test(label)) score -= 4;
+  if (/telephoto/.test(label)) score -= 6;
+  if (/back camera$|rear camera$/.test(label)) score += 8;
+  return score;
+}
+
+function chooseRecommendedCamera(cameras) {
+  return [...cameras].sort((left, right) => cameraScore(right) - cameraScore(left))[0]?.id || cameras[0]?.id;
+}
+
+function scanBox(viewWidth, viewHeight) {
+  const width = Math.floor(Math.min(viewWidth * 0.88, 680));
+  const height = Math.floor(Math.min(viewHeight * 0.28, 210));
+  return { width: width - (width % 2), height: height - (height % 2) };
+}
+
+async function startSelectedCamera(cameraId) {
+  await disposeScanner();
+  elements.scannerReader.replaceChildren();
+  scanner = new Html5Qrcode("scanner-reader", {
+    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
+    useBarCodeDetectorIfSupported: true,
+  });
+  try {
+    await scanner.start(
+      cameraId,
+      { fps: 15, qrbox: scanBox, aspectRatio: 1.777, disableFlip: true },
+      (decodedText) => lookupIsbn(decodedText),
+      () => {},
+    );
+    localStorage.setItem("up-bookshelf-camera", cameraId);
+    let capabilities = {};
+    try { capabilities = scanner.getRunningTrackCapabilities() || {}; } catch { /* Browser does not expose capabilities. */ }
+    elements.torchButton.hidden = !capabilities.torch;
+  } catch (error) {
+    await disposeScanner();
+    elements.scanActions.hidden = false;
+    elements.scannerShell.hidden = true;
+    toast(error?.message || "That camera could not be started. Try another camera or take a photo.", "error");
+  }
+}
+
+async function startLiveScanner() {
+  if (!window.Html5Qrcode) {
     toast("The scanner could not load. Enter the ISBN manually.", "error");
     return;
   }
 
   elements.scanActions.hidden = true;
   elements.scannerShell.hidden = false;
-  scanner = new Html5QrcodeScanner(
-    "scanner-reader",
-    {
-      fps: 10,
-      qrbox: { width: 270, height: 150 },
-      aspectRatio: 1.6,
-      rememberLastUsedCamera: true,
-      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA, Html5QrcodeScanType.SCAN_TYPE_FILE],
-      formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8],
-    },
-    false,
-  );
-  scanner.render((decodedText) => lookupIsbn(decodedText), () => {});
+  elements.cameraSettings.hidden = false;
+  try {
+    const cameras = await Html5Qrcode.getCameras();
+    if (!cameras.length) throw new Error("No camera was found on this device.");
+    const recommended = chooseRecommendedCamera(cameras);
+    const remembered = localStorage.getItem("up-bookshelf-camera");
+    const selected = cameras.some((camera) => camera.id === remembered) ? remembered : recommended;
+    elements.cameraSelect.innerHTML = cameras.map((camera, index) => {
+      const label = camera.label || `Camera ${index + 1}`;
+      const note = camera.id === recommended ? " — Recommended starting point" : "";
+      return `<option value="${escapeHtml(camera.id)}">${escapeHtml(label + note)}</option>`;
+    }).join("");
+    elements.cameraSelect.value = selected;
+    await startSelectedCamera(selected);
+  } catch (error) {
+    elements.scanActions.hidden = false;
+    elements.scannerShell.hidden = true;
+    toast(error?.message || "Camera access was not available. Take a photo or enter the ISBN.", "error");
+  }
+}
+
+async function toggleTorch() {
+  if (!scanner) return;
+  const next = !torchEnabled;
+  try {
+    await scanner.applyVideoConstraints({ advanced: [{ torch: next }] });
+    torchEnabled = next;
+    elements.torchButton.setAttribute("aria-pressed", String(next));
+    elements.torchButton.classList.toggle("is-on", next);
+    elements.torchLabel.textContent = next ? "Flashlight on" : "Flashlight";
+  } catch {
+    elements.torchButton.hidden = true;
+    toast("This camera does not allow flashlight control in the browser.", "info");
+  }
+}
+
+async function enhancedPhoto(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(2.5, Math.max(0.3, 2000 / bitmap.width));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.filter = "grayscale(1) contrast(1.65)";
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.94));
+  return blob ? new File([blob], "enhanced-isbn.jpg", { type: "image/jpeg" }) : null;
+}
+
+async function detectWithBrowser(file) {
+  if (!window.BarcodeDetector || !window.createImageBitmap) return null;
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    if (!supported.includes("ean_13")) return null;
+    const detector = new BarcodeDetector({ formats: ["ean_13"] });
+    const bitmap = await createImageBitmap(file);
+    const results = await detector.detect(bitmap);
+    bitmap.close();
+    return results.find((result) => /^(978|979)\d{10}$/.test(result.rawValue))?.rawValue || null;
+  } catch {
+    return null;
+  }
+}
+
+async function scanFileWithLibrary(file) {
+  scanner = new Html5Qrcode("scanner-reader", {
+    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
+    useBarCodeDetectorIfSupported: true,
+  });
+  try {
+    return await scanner.scanFile(file, true);
+  } finally {
+    try { scanner.clear(); } catch { /* The failed scan may already be clear. */ }
+    scanner = null;
+  }
 }
 
 async function scanBarcodePhoto(file) {
@@ -180,13 +411,24 @@ async function scanBarcodePhoto(file) {
 
   elements.scanActions.hidden = true;
   elements.scannerShell.hidden = false;
+  elements.cameraSettings.hidden = true;
   elements.lookupProgress.hidden = false;
-  elements.lookupProgressLabel.textContent = "Reading the barcode…";
-  scanner = new Html5Qrcode("scanner-reader");
+  elements.lookupProgressLabel.textContent = "Reading the ISBN barcode…";
   try {
-    const decodedText = await scanner.scanFile(file, true);
-    await scanner.clear().catch(() => {});
-    scanner = null;
+    const enhanced = window.createImageBitmap ? await enhancedPhoto(file).catch(() => null) : null;
+    const variants = [file, enhanced].filter(Boolean);
+    let decodedText = null;
+    for (const variant of variants) {
+      decodedText = await detectWithBrowser(variant);
+      if (decodedText) break;
+      try {
+        decodedText = await scanFileWithLibrary(variant);
+        if (decodedText) break;
+      } catch {
+        // Retry once with the high-contrast, upscaled image.
+      }
+    }
+    if (!decodedText) throw new Error("No ISBN barcode was detected");
     elements.lookupProgress.hidden = true;
     const accepted = await lookupIsbn(decodedText);
     if (!accepted && elements.scannerDialog.open) {
@@ -194,17 +436,16 @@ async function scanBarcodePhoto(file) {
       elements.scannerShell.hidden = true;
     }
   } catch {
-    await scanner?.clear().catch(() => {});
-    scanner = null;
+    await disposeScanner();
     elements.scanActions.hidden = false;
     elements.scannerShell.hidden = true;
     elements.lookupProgress.hidden = true;
-    toast("We couldn’t read an ISBN barcode in that photo. Try again closer and in good light.", "error");
+    toast("We couldn’t read the ISBN. Fill the frame with the long 978/979 barcode, keep the small price barcode outside the guide, and try good even light.", "error");
   }
 }
 
 async function lookupIsbn(rawValue) {
-  if (scanLocked) return;
+  if (scanLocked) return false;
   const isbn = String(rawValue || "").toUpperCase().replace(/[^0-9X]/g, "");
   if (![10, 13].includes(isbn.length)) {
     toast("That doesn’t look like a 10- or 13-digit ISBN.", "error");
@@ -219,26 +460,25 @@ async function lookupIsbn(rawValue) {
   elements.lookupProgress.hidden = false;
   try {
     const result = await api(`/api/lookup/${encodeURIComponent(isbn)}`);
-    closeScanner();
+    await closeScanner();
     if (result.existing) {
       toast("That book is already on your shelf.", "info");
       openBookForm(result.existing);
     } else {
-      openBookForm({ ...result.book, readingStatus: "unread" });
+      openBookForm({ ...result.book, readingStatus: "unread" }, result.providers || []);
     }
     return true;
   } catch (error) {
     scanLocked = false;
     elements.lookupProgress.hidden = true;
     if (/No book metadata/.test(error.message)) {
-      closeScanner();
+      await closeScanner();
       openBookForm({ isbn13: isbn.length === 13 ? isbn : "", isbn10: isbn.length === 10 ? isbn : "", readingStatus: "unread" });
       toast("We couldn’t find the details, but you can add them manually.", "info");
       return true;
-    } else {
-      toast(error.message, "error");
-      return false;
     }
+    toast(error.message, "error");
+    return false;
   }
 }
 
@@ -250,14 +490,34 @@ function setFormValue(name, value) {
 function updateCoverPreview() {
   const url = elements.bookForm.elements.coverUrl.value.trim();
   const title = elements.bookForm.elements.title.value.trim() || "Book";
-  elements.coverPreview.innerHTML = url
-    ? `<img src="${escapeHtml(url)}" alt="Cover preview for ${escapeHtml(title)}" />`
-    : "<span>Cover<br />preview</span>";
+  elements.coverPreview.replaceChildren();
+  if (!url) {
+    elements.coverPreview.innerHTML = "<span>Cover<br />preview</span>";
+    return;
+  }
+  const image = new Image();
+  image.alt = `Cover preview for ${title}`;
+  image.src = url;
+  image.addEventListener("error", () => {
+    elements.coverPreview.innerHTML = "<span>Cover unavailable<br /><small>Choose another provider image</small></span>";
+  }, { once: true });
+  elements.coverPreview.append(image);
 }
 
-function openBookForm(book = {}) {
+function updateProviderToolbar() {
+  const isbn = elements.bookForm.elements.isbn13.value || elements.bookForm.elements.isbn10.value;
+  elements.providerToolbar.hidden = !isbn;
+  const available = activeProviders.filter((provider) => provider.available).length;
+  elements.providerSummary.textContent = available
+    ? `${available} provider${available === 1 ? "" : "s"} returned choices for this edition.`
+    : "Find alternate covers, descriptions, and book details.";
+  elements.compareMetadata.textContent = available ? "Compare providers" : "Find provider options";
+}
+
+function openBookForm(book = {}, providers = []) {
   elements.bookForm.reset();
   elements.formError.hidden = true;
+  activeProviders = providers;
   const values = {
     id: book.id,
     metadataSource: book.metadataSource,
@@ -284,8 +544,142 @@ function openBookForm(book = {}) {
   elements.saveBook.textContent = editing ? "Save changes" : "Add to shelf";
   elements.deleteBook.hidden = !editing;
   updateCoverPreview();
+  updateProviderToolbar();
   elements.bookDialog.showModal();
   setTimeout(() => elements.bookForm.elements.title.focus(), 50);
+}
+
+function valueText(value) {
+  if (Array.isArray(value)) return value.join(", ");
+  return value == null ? "" : String(value);
+}
+
+function currentFieldValue(field) {
+  return elements.bookForm.elements.namedItem(field)?.value?.trim() || "";
+}
+
+function buildChoiceCatalog(field) {
+  const choices = [];
+  const add = (provider, value) => {
+    const text = valueText(value).trim();
+    if (!text || choices.some((choice) => choice.value === text)) return;
+    choices.push({ provider, value: text });
+  };
+  add("Current", currentFieldValue(field));
+  for (const provider of activeProviders.filter((item) => item.available)) add(provider.name, provider.book?.[field]);
+  return choices;
+}
+
+function renderMetadataChoices() {
+  const availableProviders = activeProviders.filter((provider) => provider.available);
+  elements.providerStatuses.innerHTML = activeProviders.map((provider) => {
+    const status = provider.available ? "Choices found" : (provider.configured ? "No match returned" : "API key not configured");
+    const providerLink = provider.book?.providerUrl
+      ? `<a class="text-button" href="${escapeHtml(provider.book.providerUrl)}" target="_blank" rel="noreferrer">View</a>`
+      : "";
+    return `<div class="provider-status provider-${escapeHtml(provider.id)} ${provider.available ? "is-available" : ""}">
+      <span><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(status)}</small></span>
+      <div class="provider-actions">${providerLink}${provider.available ? `<button class="text-button" type="button" data-use-provider="${escapeHtml(provider.id)}">Use all</button>` : ""}</div>
+    </div>`;
+  }).join("");
+
+  coverCatalog = [];
+  const addCover = (provider, url, providerId = "", providerIndex = 0) => {
+    if (!url || coverCatalog.some((cover) => cover.url === url)) return;
+    coverCatalog.push({ provider, providerId, providerIndex, url });
+  };
+  addCover("Current", currentFieldValue("coverUrl"));
+  for (const provider of availableProviders) {
+    const covers = provider.book?.coverCandidates?.length ? provider.book.coverCandidates : [provider.book?.coverUrl];
+    covers.slice(0, 4).forEach((url, index) => addCover(provider.name, url, provider.id, index));
+  }
+
+  metadataCatalog = Object.fromEntries(METADATA_FIELDS.map(([field]) => [field, buildChoiceCatalog(field)]));
+  metadataCatalog.description = buildChoiceCatalog("description");
+  const coverHtml = coverCatalog.length
+    ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Cover</span><h3>Pick the straightest, clearest cover</h3></div><div class="cover-choice-grid">${coverCatalog.map((cover, index) => `
+        <label class="cover-choice"><input type="radio" name="metadata-cover" value="${index}" data-provider="${escapeHtml(cover.provider)}" ${index === 0 ? "checked" : ""} /><span><img src="${escapeHtml(cover.url)}" alt="${escapeHtml(cover.provider)} cover option" loading="lazy" /><small>${escapeHtml(cover.provider)}</small></span></label>
+      `).join("")}</div></section>`
+    : `<section class="choice-section"><p class="choice-empty">No provider returned a cover for this edition.</p></section>`;
+
+  const fieldHtml = METADATA_FIELDS.map(([field, label]) => {
+    const choices = metadataCatalog[field];
+    if (!choices.length) return "";
+    return `<label class="metadata-field"><span>${escapeHtml(label)}</span><select data-metadata-field="${field}">${choices.map((choice, index) => `<option value="${index}" data-provider="${escapeHtml(choice.provider)}">${escapeHtml(choice.value)} — ${escapeHtml(choice.provider)}</option>`).join("")}</select></label>`;
+  }).join("");
+
+  const descriptions = metadataCatalog.description;
+  const descriptionHtml = descriptions.length ? `<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Description</span><h3>Pick the synopsis you prefer</h3></div><div class="description-choices">${descriptions.map((choice, index) => `
+    <label class="description-choice"><input type="radio" name="metadata-description" value="${index}" data-provider="${escapeHtml(choice.provider)}" ${index === 0 ? "checked" : ""} /><span><strong>${escapeHtml(choice.provider)}</strong><small>${escapeHtml(choice.value)}</small></span></label>
+  `).join("")}</div></section>` : "";
+
+  elements.metadataChoices.innerHTML = `${coverHtml}<section class="choice-section"><div class="choice-heading"><span class="eyebrow">Book details</span><h3>Choose each field</h3></div><div class="metadata-field-grid">${fieldHtml}</div></section>${descriptionHtml}`;
+}
+
+async function openMetadataComparison() {
+  const isbn = (elements.bookForm.elements.isbn13.value || elements.bookForm.elements.isbn10.value).trim();
+  if (!isbn) {
+    toast("Add an ISBN before checking providers.", "info");
+    return;
+  }
+  elements.compareMetadata.disabled = true;
+  elements.compareMetadata.textContent = "Checking providers…";
+  try {
+    const result = await api(`/api/metadata/${encodeURIComponent(isbn)}`);
+    activeProviders = result.providers || [];
+    updateProviderToolbar();
+    renderMetadataChoices();
+    elements.metadataDialog.showModal();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    elements.compareMetadata.disabled = false;
+    elements.compareMetadata.textContent = activeProviders.some((provider) => provider.available) ? "Compare providers" : "Find provider options";
+  }
+}
+
+function useAllFromProvider(providerId) {
+  const provider = activeProviders.find((item) => item.id === providerId);
+  if (!provider?.available) return;
+  elements.metadataChoices.querySelectorAll("select[data-metadata-field]").forEach((select) => {
+    const option = [...select.options].find((item) => item.dataset.provider === provider.name);
+    if (option) select.value = option.value;
+  });
+  for (const name of ["metadata-cover", "metadata-description"]) {
+    const input = elements.metadataChoices.querySelector(`input[name="${name}"][data-provider="${CSS.escape(provider.name)}"]`);
+    if (input) input.checked = true;
+  }
+}
+
+function applyMetadataChoices() {
+  const sources = [];
+  elements.metadataChoices.querySelectorAll("select[data-metadata-field]").forEach((select) => {
+    const field = select.dataset.metadataField;
+    const choice = metadataCatalog[field]?.[Number(select.value)];
+    if (!choice) return;
+    setFormValue(field, choice.value);
+    sources.push(choice.provider);
+  });
+  const coverInput = elements.metadataChoices.querySelector('input[name="metadata-cover"]:checked');
+  if (coverInput) {
+    const choice = coverCatalog[Number(coverInput.value)];
+    if (choice) {
+      setFormValue("coverUrl", choice.url);
+      sources.push(choice.provider);
+    }
+  }
+  const descriptionInput = elements.metadataChoices.querySelector('input[name="metadata-description"]:checked');
+  if (descriptionInput) {
+    const choice = metadataCatalog.description?.[Number(descriptionInput.value)];
+    if (choice) {
+      setFormValue("description", choice.value);
+      sources.push(choice.provider);
+    }
+  }
+  setFormValue("metadataSource", [...new Set(sources.filter((source) => source !== "Current"))].join(" + "));
+  updateCoverPreview();
+  elements.metadataDialog.close();
+  toast("Your provider choices were applied.");
 }
 
 function formBookData() {
@@ -293,6 +687,10 @@ function formBookData() {
   data.authors = data.authors.split(",").map((item) => item.trim()).filter(Boolean);
   data.categories = data.categories.split(",").map((item) => item.trim()).filter(Boolean);
   return data;
+}
+
+function isKnownProviderCover(url) {
+  return activeProviders.some((provider) => provider.book?.coverCandidates?.includes(url) || provider.book?.coverUrl === url);
 }
 
 async function saveBook(event) {
@@ -303,6 +701,20 @@ async function saveBook(event) {
   elements.saveBook.disabled = true;
   elements.saveBook.textContent = editing ? "Saving…" : "Adding…";
   try {
+    const isbn = data.isbn13 || data.isbn10;
+    if (isbn && /^https:\/\//i.test(data.coverUrl || "") && isKnownProviderCover(data.coverUrl)) {
+      const providerCover = coverCatalog.find((cover) => cover.url === data.coverUrl);
+      const cached = await api("/api/covers/cache", {
+        method: "POST",
+        body: JSON.stringify({
+          isbn,
+          coverUrl: data.coverUrl,
+          providerId: providerCover?.providerId || "",
+          providerCoverIndex: providerCover?.providerIndex || 0,
+        }),
+      });
+      data.coverUrl = cached.coverUrl;
+    }
     await api(editing ? `/api/books/${data.id}` : "/api/books", {
       method: editing ? "PUT" : "POST",
       body: JSON.stringify(data),
@@ -353,6 +765,8 @@ document.addEventListener("click", (event) => {
     if (action === "edit") editBook(id);
     if (action === "reload") loadBooks();
   }
+  const providerButton = event.target.closest("[data-use-provider]");
+  if (providerButton) useAllFromProvider(providerButton.dataset.useProvider);
   const closeElement = event.target.closest("[data-close]");
   if (closeElement) {
     if (closeElement.dataset.close === "scanner-dialog") closeScanner();
@@ -360,6 +774,9 @@ document.addEventListener("click", (event) => {
   }
 });
 
+elements.themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+elements.settingsButton.addEventListener("click", openSettings);
+elements.settingsForm.addEventListener("submit", saveSettings);
 elements.isbnForm.addEventListener("submit", (event) => {
   event.preventDefault();
   lookupIsbn(elements.isbnInput.value);
@@ -367,9 +784,15 @@ elements.isbnForm.addEventListener("submit", (event) => {
 elements.photoScanButton.addEventListener("click", () => elements.barcodePhoto.click());
 elements.barcodePhoto.addEventListener("change", () => scanBarcodePhoto(elements.barcodePhoto.files?.[0]));
 elements.liveScanButton.addEventListener("click", startLiveScanner);
+elements.cameraSelect.addEventListener("change", () => startSelectedCamera(elements.cameraSelect.value));
+elements.torchButton.addEventListener("click", toggleTorch);
 elements.bookForm.addEventListener("submit", saveBook);
 elements.deleteBook.addEventListener("click", removeBook);
+elements.compareMetadata.addEventListener("click", openMetadataComparison);
+elements.applyMetadata.addEventListener("click", applyMetadataChoices);
 elements.bookForm.elements.coverUrl.addEventListener("input", updateCoverPreview);
+elements.bookForm.elements.isbn13.addEventListener("input", updateProviderToolbar);
+elements.bookForm.elements.isbn10.addEventListener("input", updateProviderToolbar);
 elements.search.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(loadBooks, 250);
@@ -383,10 +806,12 @@ elements.scannerDialog.addEventListener("cancel", (event) => {
 elements.scannerDialog.addEventListener("click", (event) => {
   if (event.target === elements.scannerDialog) closeScanner();
 });
-elements.bookDialog.addEventListener("click", (event) => {
-  if (event.target === elements.bookDialog) elements.bookDialog.close();
-});
+for (const dialog of [elements.bookDialog, elements.metadataDialog, elements.settingsDialog]) {
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+}
 
+initializeTheme();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});
-
-Promise.all([loadBooks(), loadStats()]);
+Promise.all([loadConfig(), loadBooks(), loadStats()]);

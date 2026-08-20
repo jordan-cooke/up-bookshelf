@@ -1,123 +1,165 @@
-# JnC Bookshelf
+# UP Bookshelf
 
-A private, self-hosted home library designed for a phone. Scan the ISBN barcode on a book, confirm the details, and add it to a searchable digital bookshelf.
+**UP (Ur Private) Bookshelf** is a private, self-hosted home library designed for a phone. Scan an ISBN barcode, compare metadata and cover choices, and add the edition to a searchable digital shelf.
+
+The display name is configurable without rebuilding the image. Leave `BOOKSHELF_NAME` blank for **UP Bookshelf**, or set it to `JnC` for **JnC Bookshelf**.
 
 ## What it does
 
-- Scans ISBN barcodes with the phone camera
-- Offers photo upload/capture and manual ISBN entry as fallbacks
-- Fetches title, author, cover, description, publisher, page count, and categories from Google Books and Open Library
-- Saves fetched cover art in the persistent appdata volume so phones load it directly from JnC Bookshelf
-- Prevents duplicate ISBNs
-- Searches by title, author, publisher, or ISBN
-- Sorts by date added, title, author, rating, or publication date
-- Tracks want-to-read, reading, finished, and did-not-finish states
-- Stores ratings and private notes
-- Exports the collection as JSON
+- Scans Bookland ISBN-13 barcodes with a phone camera
+- Lets the user choose any detected phone camera and remembers that choice
+- Suggests a likely rear/main camera without forcing it
+- Offers a flashlight control when the selected camera and browser support it
+- Retries captured photos with an enhanced, high-contrast image
+- Rejects retail/product barcodes and the small five-digit price supplement
+- Looks up editions through Open Library, Google Books, and optionally Amazon Creators API
+- Compares provider covers, descriptions, and individual fields before saving
+- Removes Google’s `edge=curl` cover treatment and caches the selected cover locally
+- Edits existing books and refreshes their provider choices at any time
+- Searches, sorts, filters, rates, and tracks reading status
+- Stores private notes and exports the library as JSON
+- Includes light and dark themes
+- Lets the owner change the bookshelf name and welcome message in the app
 - Installs to a phone home screen as a PWA
 
-Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, and embedded SQLite support. No separate database container is required. The server makes outbound requests to Google Books and Open Library when it looks up an ISBN, but the library, cover cache, ratings, and notes stay in the mounted appdata directory on your Unraid server.
+Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, embedded SQLite support, and local cover cache. No separate database container is required. The application makes outbound provider requests only during metadata lookup; the library and chosen covers remain in the mounted appdata directory.
 
-## Unraid quick start
+## Unraid quick start with Compose Manager
 
-The simplest Unraid deployment uses Docker directly and does not require Compose.
-
-1. Open the Unraid terminal and clone the Gitea repository into appdata:
+1. Clone the repository into appdata:
 
    ```bash
    cd /mnt/user/appdata
    git clone http://10.1.10.221:3008/jnc/Bookshelf.git jnc-bookshelf
    cd jnc-bookshelf
+   cp .env.example .env
+   mkdir -p /mnt/user/appdata/jnc-bookshelf/data
    ```
 
-   If the repository is private, Git will prompt for the Gitea username and a personal access token. If Git is unavailable on Unraid, download the repository ZIP from Gitea and extract it to `/mnt/user/appdata/jnc-bookshelf` instead.
+2. Edit `.env`:
 
-2. Create the persistent data directory, build the image, and start the container:
+   ```dotenv
+   APP_PORT=3080
+   APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data
+   TRUST_PROXY=1
+   BOOKSHELF_NAME=JnC
+   ```
+
+   `TRUST_PROXY=1` is appropriate when Tailscale Serve or another trusted HTTPS proxy is in front of the app. Leave `BOOKSHELF_NAME=` blank to use **UP Bookshelf**.
+
+3. Optional providers are commented in both `.env.example` and `compose.yaml`. To enable Google Books, uncomment its environment line in `compose.yaml`, then add the key only to the private `.env` file:
+
+   ```dotenv
+   GOOGLE_BOOKS_API_KEY=your_google_books_api_key
+   ```
+
+   Do not commit `.env`. Open Library needs no key.
+
+4. Build and start from Compose Manager, or use a terminal that has the Compose plugin:
 
    ```bash
-   mkdir -p /mnt/user/appdata/jnc-bookshelf/data
-   docker build --no-cache -t jnc-bookshelf:latest .
-   docker run -d \
-     --name jnc-bookshelf \
-     --restart unless-stopped \
-     -p 3080:3000 \
-     -v /mnt/user/appdata/jnc-bookshelf/data:/data \
-     jnc-bookshelf:latest
+   docker compose up -d --build
+   docker compose logs -f app
    ```
 
-3. On your home network, open:
+5. Open `http://YOUR-UNRAID-IP:3080`. No username or password is required.
 
-   ```text
-   http://YOUR-UNRAID-IP:3080
-   ```
+The existing SQLite library remains at `/mnt/user/appdata/jnc-bookshelf/data/bookshelf.sqlite` across rebuilds and container replacement.
 
-The first build can take a minute. The app automatically creates `/mnt/user/appdata/jnc-bookshelf/data/bookshelf.sqlite`; that file remains in place across container replacements and updates. No username or password is required on the local network.
+After deployment, the header gear opens **Bookshelf settings**. A name saved there overrides the Compose default, and the welcome message can be rewritten or left blank to remove it. These settings are stored in the same SQLite backup as the books.
 
-The included `compose.yaml` is optional for users with Compose Manager. Copy `.env.example` to `.env`, set `APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data`, and run `docker compose up -d --build`.
+## Direct Docker deployment
 
-Open Library works without a key. For additional metadata and cover coverage, create a Google Books API key, then add it to `.env` before recreating the container:
-
-```dotenv
-GOOGLE_BOOKS_API_KEY=your_google_books_api_key
-```
-
-The key remains a server-side Docker environment variable and is never sent to the phone. A Google key is optional; JnC Bookshelf follows Open Library edition records to their work records so descriptions are still populated when Open Library has them.
-
-If you use the direct `docker run` deployment instead of Compose, pass the same key when recreating the container:
+Unraid installations without Compose Manager can run the same image directly:
 
 ```bash
--e GOOGLE_BOOKS_API_KEY='your_google_books_api_key' \
+cd /mnt/user/appdata/jnc-bookshelf
+docker build --no-cache -t jnc-bookshelf:latest .
+docker run -d \
+  --name jnc-bookshelf \
+  --restart unless-stopped \
+  -p 3080:3000 \
+  -e DB_PATH=/data/bookshelf.sqlite \
+  -e TRUST_PROXY=1 \
+  -e BOOKSHELF_NAME=JnC \
+  -e GOOGLE_BOOKS_API_KEY='your_google_books_api_key' \
+  -v /mnt/user/appdata/jnc-bookshelf/data:/data \
+  jnc-bookshelf:latest
 ```
 
-## HTTPS and phone camera access
+Omit the Google environment line if it is not configured. Secrets are server-side environment variables and are never returned to the phone.
 
-The primary **Scan a book** action opens the phone camera or photo picker and reads the ISBN from the resulting picture. This works on a normal local address such as `http://10.1.10.221:3080` and does not require HTTPS.
+## Amazon provider
 
-Mobile browsers require a **trusted HTTPS connection** only for the optional live viewfinder. When the app detects HTTPS, it also offers **Use live scanner**.
+The integration uses the current **Amazon Creators API**, not the retired Product Advertising API 5. Amazon access requires an accepted Amazon Associates account, approved Creators API access, an application credential, and an Associates partner tag. Amazon states that Creators API applications must be eligible under its license and direct sales to Amazon, so only enable this optional provider if Amazon has approved the way you intend to use it. Vended product links are preserved unchanged in the comparison screen.
 
-For live scanning, put the app behind your existing HTTPS reverse proxy, such as Nginx Proxy Manager or SWAG, and use a certificate trusted by the phone. Proxy the HTTPS hostname to:
-
-```text
-http://YOUR-UNRAID-IP:3080
-```
-
-Then set this in `.env` and recreate the app container:
+Uncomment all Amazon lines in `compose.yaml`, then add the private values to `.env`:
 
 ```dotenv
-TRUST_PROXY=1
+AMAZON_CREATORS_CLIENT_ID=your_client_id
+AMAZON_CREATORS_CLIENT_SECRET=your_client_secret
+AMAZON_CREATORS_CREDENTIAL_VERSION=3.1
+AMAZON_ASSOCIATE_TAG=your-associate-tag-20
+AMAZON_MARKETPLACE=www.amazon.com
 ```
 
-Do not expose port 3080 directly to the public internet. The app intentionally has no login because it is designed for a trusted home network.
+Credential version `3.1` is the North America token endpoint, `3.2` is Europe, and `3.3` is Far East. The marketplace and Associates tag must belong together. Amazon remains visible in the comparison screen as “API key not configured” until every required value is supplied.
 
-## Add it to her phone
+Amazon-sourced covers are revalidated after one day to follow the Creators API resource-caching rules. The comparison screen also includes the provider's Amazon product link when one is returned. Open Library and Google Books continue to work without Amazon credentials.
 
-After opening the local address (or an HTTPS address, if configured):
+## HTTPS, camera selection, and flashlight
+
+Taking a barcode photo works on a normal local HTTP address. Browsers require a trusted HTTPS origin for the optional live scanner, camera enumeration, and flashlight controls.
+
+The live scanner lists every camera the browser exposes. It marks a likely rear/main lens as a recommended starting point but never locks the user to it; ultra-wide or another lens may focus better on a particular phone. The choice is saved only in that browser. The flashlight button appears only when the selected camera exposes torch capability.
+
+For the most reliable scan:
+
+- Place the long 978/979 barcode inside the guide.
+- Keep the separate five-digit price barcode outside the guide when possible.
+- Use even natural light before turning on the flashlight.
+- Move slightly farther away if the selected lens cannot focus close up.
+- Switch cameras when another lens produces sharper bars.
+
+Do not expose port 3080 directly to the public internet. This application intentionally has no login and is intended for a trusted LAN or private tailnet.
+
+## Add it to a phone
 
 - **iPhone/iPad:** Safari → Share → Add to Home Screen
 - **Android:** Chrome → menu → Install app or Add to Home screen
 
-The app shell can open when the network briefly drops, but adding, editing, searching, and metadata lookup still need a connection to the Unraid server.
+## Provider comparison and cover repair
+
+After a scan, select **Compare providers** in the book form. The comparison screen provides:
+
+- Up to four cover candidates from each provider
+- A provider-wide **Use all** shortcut
+- Per-field choices for title, author, publisher, date, pages, language, genres, and ISBN
+- Separate description choices
+
+For a book already on the shelf, open the book and select **Find provider options** or **Compare providers**. When a provider cover is selected and the book is saved, the server validates and downloads the image to `/data/covers`. This replaces the previous cached cover for that ISBN. Amazon images are refreshed after the provider's one-day cache window; other provider covers remain local until you choose a replacement.
 
 ## Backups
 
-The download icon in the header exports the human-readable collection as JSON. For a complete restorable backup, include this directory in your normal Unraid appdata backup:
+The download icon exports a human-readable JSON backup. For a complete restorable backup, include:
 
 ```text
 /mnt/user/appdata/jnc-bookshelf/data
 ```
 
-Stop the app before making a raw filesystem copy of the SQLite files so the database and its write-ahead log remain consistent. The JSON export is convenient for inspection and migration; the appdata directory is the disaster-recovery copy. Unraid backup tools that stop containers before copying appdata are suitable.
+Stop the container before making a raw filesystem copy of the SQLite database and its write-ahead log. Unraid appdata backup tools that stop containers before copying are suitable.
 
-## Updating and operations
+## Updating
 
-To update from Gitea with Compose Manager:
+With Compose Manager:
 
 ```bash
+cd /mnt/user/appdata/jnc-bookshelf
 git pull
 docker compose up -d --build
 ```
 
-If Unraid does not have Docker Compose installed, rebuild and replace only the app container with:
+Without Compose:
 
 ```bash
 cd /mnt/user/appdata/jnc-bookshelf
@@ -125,46 +167,26 @@ git pull
 docker build --no-cache -t jnc-bookshelf:latest .
 docker stop jnc-bookshelf
 docker rm jnc-bookshelf
-docker run -d \
-  --name jnc-bookshelf \
-  --restart unless-stopped \
-  -p 3080:3000 \
-  -e DB_PATH=/data/bookshelf.sqlite \
-  -v /mnt/user/appdata/jnc-bookshelf/data:/data \
-  jnc-bookshelf:latest
 ```
 
-Replacing the container does not remove the library: the SQLite database remains in `/mnt/user/appdata/jnc-bookshelf/data`. Confirm the running release with:
+Then repeat the `docker run` command above. Removing the container does not remove the bind-mounted library data.
+
+Confirm the running version:
 
 ```bash
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 1.4.1 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.4.1","storage":"sqlite","authentication":false}`. It automatically looks up a valid ISBN through Google Books and Open Library, follows Open Library work records for richer descriptions, and caches the best high-resolution cover under `/data/covers`. The scanner accepts Bookland ISBN barcodes beginning with `978` or `979` and rejects unrelated retail/product barcodes instead of opening an empty form. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
-
-Useful commands:
-
-```bash
-docker compose ps
-docker compose logs -f app
-docker compose down
-```
-
-`docker compose down` removes the container and network, but it does not delete the bind-mounted SQLite data.
+Release 2.0.0 reports the configured app name and preserves existing version 1.x SQLite data without a migration.
 
 ## Local development
 
-Requirements: Node.js 22.16 or newer. SQLite is built into Node, so no separate database server is required.
+Node.js 22.16 or newer is required. SQLite is built into Node.
 
 ```bash
 pnpm install
 cp .env.example .env
 pnpm start
-```
-
-The local database defaults to `data/bookshelf.sqlite`; override it with `DB_PATH` if needed. Run the automated checks with:
-
-```bash
 pnpm test
 ```
 
@@ -172,15 +194,9 @@ pnpm test
 
 ```text
 bookshelf/
-├── compose.yaml       # Single-container app stack
+├── compose.yaml       # Single-container app stack and optional providers
 ├── Dockerfile
 ├── public/            # Mobile PWA interface
-├── src/               # API, validation, metadata, and database code
+├── src/               # API, provider, validation, and database code
 └── tests/             # Node test suite
 ```
-
-## Metadata notes
-
-Book data is matched by ISBN. Open Library is always queried and needs no key. If `GOOGLE_BOOKS_API_KEY` is configured, Google Books is queried too and the best fields from both results are merged. Cover downloads are restricted to the configured book providers, validated as real images, limited to 8 MB, and stored in `/data/covers` so the phone does not need to hot-link provider images.
-
-Some older, self-published, or very new books may not exist in either provider, and occasional editions still have incomplete metadata. When that happens, the app opens a prefilled manual form so the book can be added and edited.

@@ -1,13 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createApp } from "./app.js";
+import { bookshelfIdentity, createApp } from "./app.js";
 import { initializeDatabase } from "./repository.js";
 
 const config = {
   port: Number(process.env.PORT || 3000),
   trustProxy: process.env.TRUST_PROXY === "1",
   databasePath: process.env.DB_PATH || path.resolve("data", "bookshelf.sqlite"),
+  bookshelfName: process.env.BOOKSHELF_NAME || "",
 };
 
 config.coverDirectory = process.env.COVER_PATH || path.join(path.dirname(config.databasePath), "covers");
@@ -20,9 +21,10 @@ const app = createApp({
   database,
   trustProxy: config.trustProxy,
   coverDirectory: config.coverDirectory,
+  bookshelfName: config.bookshelfName,
 });
 const server = app.listen(config.port, "0.0.0.0", () => {
-  console.log(`JnC Bookshelf is listening on port ${config.port}.`);
+  console.log(`${bookshelfIdentity(config.bookshelfName).appName} is listening on port ${config.port}.`);
   console.log(`SQLite database: ${config.databasePath}`);
   console.log(`Cover cache: ${config.coverDirectory}`);
 });

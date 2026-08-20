@@ -33,12 +33,16 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.equal(health.status, 200);
     assert.deepEqual(await health.json(), {
       status: "ok",
-      app: "JnC Bookshelf",
-      version: "1.4.1",
+      app: "UP Bookshelf",
+      version: "2.0.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.4.1");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.0.0");
+
+    const config = await (await fetch(`${baseUrl}/api/config`)).json();
+    assert.equal(config.appName, "UP Bookshelf");
+    assert.equal(config.brandName, "UP");
 
     const response = await fetch(`${baseUrl}/api/books?sort=title&order=asc`);
     assert.equal(response.status, 200);
@@ -54,15 +58,19 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=1\.4\.1/);
+    assert.match(html, /styles\.css\?v=2\.0\.0/);
     assert.match(html, /capture="environment"/);
+    assert.match(html, /id="theme-toggle"/);
+    assert.match(html, /id="camera-select"/);
+    assert.match(html, /id="torch-button"/);
+    assert.match(html, /id="metadata-dialog"/);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.4.1`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.0.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     assert.match(await stylesheet.text(), /\.site-header/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=1.4.1`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.0.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     assert.match(await script.text(), /scanBarcodePhoto/);
@@ -73,7 +81,7 @@ test("serves the styled app shell with safe cache headers", async () => {
 
     const manifest = await fetch(`${baseUrl}/manifest.webmanifest`);
     assert.equal(manifest.status, 200);
-    assert.equal((await manifest.json()).name, "JnC Bookshelf");
+    assert.equal((await manifest.json()).name, "UP Bookshelf");
 
     const barcodeReader = await fetch(`${baseUrl}/vendor/html5-qrcode/html5-qrcode.min.js`);
     assert.equal(barcodeReader.status, 200);
@@ -145,7 +153,40 @@ test("looks up a valid ISBN and returns normalized book details", async () => {
         isbn13: "9780547928227",
         readingStatus: "unread",
       },
+      providers: [],
     });
+  });
+});
+
+test("uses an optional private library name without changing the image", async () => {
+  await withServer({ bookshelfName: "JnC" }, async (baseUrl) => {
+    assert.equal((await (await fetch(`${baseUrl}/api/config`)).json()).appName, "JnC Bookshelf");
+    assert.equal((await (await fetch(`${baseUrl}/manifest.webmanifest`)).json()).name, "JnC Bookshelf");
+    assert.equal((await (await fetch(`${baseUrl}/api/health`)).json()).app, "JnC Bookshelf");
+  });
+});
+
+test("persists a custom name and removable welcome message in SQLite", async () => {
+  await withServer({ bookshelfName: "Family" }, async (baseUrl) => {
+    const saved = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "JnC", tagline: "Our stories live here." }),
+    });
+    assert.equal(saved.status, 200);
+    assert.deepEqual({
+      appName: (await saved.json()).appName,
+      tagline: (await (await fetch(`${baseUrl}/api/config`)).json()).tagline,
+    }, { appName: "JnC Bookshelf", tagline: "Our stories live here." });
+
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "", tagline: "" }),
+    });
+    const reset = await (await fetch(`${baseUrl}/api/config`)).json();
+    assert.equal(reset.appName, "Family Bookshelf");
+    assert.equal(reset.tagline, "");
   });
 });
 

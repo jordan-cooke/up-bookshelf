@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeBookMetadata, normalizeGoogleBook, normalizeOpenLibraryBook } from "../src/metadata.js";
+import { mergeBookMetadata, normalizeAmazonBook, normalizeGoogleBook, normalizeOpenLibraryBook } from "../src/metadata.js";
 
 test("normalizes Google Books metadata and upgrades cover URLs", () => {
   const result = normalizeGoogleBook(
@@ -10,7 +10,7 @@ test("normalizes Google Books metadata and upgrades cover URLs", () => {
           title: "A Wizard of Earthsea",
           authors: ["Ursula K. Le Guin"],
           industryIdentifiers: [{ type: "ISBN_13", identifier: "9780547773742" }],
-          imageLinks: { large: "http://example.com/large-cover.jpg", thumbnail: "http://example.com/cover.jpg" },
+          imageLinks: { large: "http://example.com/large-cover.jpg?edge=curl", thumbnail: "http://example.com/cover.jpg" },
           pageCount: 320,
         },
       }],
@@ -50,7 +50,40 @@ test("normalizes Open Library metadata", () => {
   assert.deepEqual(result.authors, ["Example Author"]);
   assert.equal(result.description, "A complete work-level description.");
   assert.equal(result.language, "eng");
-  assert.equal(result.coverCandidates[0], "https://covers.openlibrary.org/b/id/15107046.jpg?default=false");
+  assert.equal(result.coverCandidates[0], "https://covers.openlibrary.org/b/id/15107046-L.jpg?default=false");
+});
+
+test("normalizes Amazon Creators API book resources", () => {
+  const result = normalizeAmazonBook({
+    searchResult: {
+      items: [{
+        images: { primary: { large: { url: "https://m.media-amazon.com/images/I/example.jpg" } } },
+        itemInfo: {
+          title: { displayValue: "The Hobbit" },
+          byLineInfo: {
+            contributors: [{ name: "J. R. R. Tolkien", roleType: "author" }],
+            manufacturer: { displayValue: "Mariner Books" },
+          },
+          contentInfo: {
+            pagesCount: { displayValue: 300 },
+            publicationDate: { displayValue: "2012-09-18" },
+            languages: { displayValues: [{ displayValue: "English", type: "Published" }] },
+          },
+          externalIds: {
+            eans: { displayValues: ["9780547928227"] },
+            isbns: { displayValues: ["054792822X"] },
+          },
+          features: { displayValues: ["An enduring fantasy classic."] },
+        },
+      }],
+    },
+  }, "9780547928227");
+
+  assert.equal(result.title, "The Hobbit");
+  assert.deepEqual(result.authors, ["J. R. R. Tolkien"]);
+  assert.equal(result.pageCount, 300);
+  assert.equal(result.description, "An enduring fantasy classic.");
+  assert.equal(result.coverUrl, "https://m.media-amazon.com/images/I/example.jpg");
 });
 
 test("merges providers so richer descriptions and cover choices are retained", () => {

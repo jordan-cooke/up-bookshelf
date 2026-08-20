@@ -1,6 +1,6 @@
 {
-  "name": "JnC Bookshelf",
-  "short_name": "JnC Bookshelf",
+  "name": "UP Bookshelf",
+  "short_name": "UP Bookshelf",
   "description": "A private, self-hosted home library.",
   "start_url": "/",
   "display": "standalone",

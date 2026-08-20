@@ -97,7 +97,33 @@ export function initializeDatabase(database) {
     CREATE INDEX IF NOT EXISTS books_author_index ON books (author_sort);
     CREATE INDEX IF NOT EXISTS books_status_index ON books (reading_status);
     CREATE INDEX IF NOT EXISTS books_created_index ON books (created_at);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
+}
+
+export function getAppSettings(database) {
+  return Object.fromEntries(database.prepare("SELECT key, value FROM app_settings").all().map((row) => [row.key, row.value]));
+}
+
+export function saveAppSettings(database, settings) {
+  const statement = database.prepare(`
+    INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `);
+  database.exec("BEGIN");
+  try {
+    for (const [key, value] of Object.entries(settings)) statement.run(key, String(value));
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+  return getAppSettings(database);
 }
 
 export function listBooks(database, options = {}) {
