@@ -27,3 +27,8 @@ test("rejects missing titles and malformed ISBNs", () => {
 test("rejects non-http cover URLs", () => {
   assert.throws(() => validateBook({ title: "Book", coverUrl: "javascript:alert(1)" }), /Cover URL/);
 });
+
+test("allows a locally cached Bookshelf cover", () => {
+  const book = validateBook({ title: "Book", coverUrl: "/api/covers/9781399745413.jpg" });
+  assert.equal(book.coverUrl, "/api/covers/9781399745413.jpg");
+});

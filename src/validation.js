@@ -22,12 +22,13 @@ function cleanList(value, maxItems = 20) {
 function cleanUrl(value) {
   const candidate = cleanText(value, 2000);
   if (!candidate) return null;
+  if (/^\/api\/covers\/(?:97[89]\d{10}|\d{9}[\dX])\.(?:jpg|png|webp|avif)$/i.test(candidate)) return candidate;
   try {
     const url = new URL(candidate);
     if (!["http:", "https:"].includes(url.protocol)) throw new Error();
     return url.toString();
   } catch {
-    throw new ValidationError("Cover URL must be a valid http or https address.");
+    throw new ValidationError("Cover URL must be a Bookshelf cover or a valid http or https address.");
   }
 }
 

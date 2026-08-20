@@ -5,6 +5,7 @@ import express from "express";
 import helmet from "helmet";
 import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
 import { lookupBookByIsbn } from "./metadata.js";
+import { cacheBookCover, resolveCoverFile } from "./covers.js";
 import {
   createBook,
   deleteBook,
@@ -18,7 +19,7 @@ import {
 import { validateBook, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "1.3.0";
+export const APP_VERSION = "1.4.0";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
 function numericId(request, response, next) {
@@ -28,7 +29,7 @@ function numericId(request, response, next) {
   return next();
 }
 
-export function createApp({ database, lookup = lookupBookByIsbn, trustProxy = false }) {
+export function createApp({ database, lookup = lookupBookByIsbn, trustProxy = false, coverDirectory = null }) {
   const app = express();
   if (trustProxy) app.set("trust proxy", 1);
 
@@ -129,7 +130,22 @@ export function createApp({ database, lookup = lookupBookByIsbn, trustProxy = fa
       if (existing) return response.json({ existing, book: null });
       const book = await lookup(isbn);
       if (!book) return response.status(404).json({ error: "No book metadata was found. You can still add it manually.", isbn });
+      const coverCandidates = book.coverCandidates?.length ? book.coverCandidates : [book.coverUrl].filter(Boolean);
+      const cachedCover = await cacheBookCover({ isbn, candidates: coverCandidates, directory: coverDirectory });
+      delete book.coverCandidates;
+      if (cachedCover) book.coverUrl = cachedCover;
       return response.json({ existing: null, book });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get("/api/covers/:filename", async (request, response, next) => {
+    try {
+      const filePath = resolveCoverFile(coverDirectory, request.params.filename);
+      if (!filePath) return response.status(404).send("Cover not found");
+      response.set("Cache-Control", "public, max-age=31536000, immutable");
+      return response.sendFile(filePath);
     } catch (error) {
       return next(error);
     }

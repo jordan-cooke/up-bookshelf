@@ -7,7 +7,7 @@
     <meta name="description" content="A private, self-hosted home library." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=1.3.0" />
+    <link rel="stylesheet" href="/styles.css?v=1.4.0" />
     <title>JnC Bookshelf</title>
   </head>
   <body>
@@ -154,7 +154,7 @@
             <div class="field"><label for="book-pages">Pages</label><input id="book-pages" name="pageCount" inputmode="numeric" type="number" min="0" /></div>
             <div class="field"><label for="book-language">Language</label><input id="book-language" name="language" maxlength="30" /></div>
             <div class="field field-wide"><label for="book-categories">Genres / subjects</label><input id="book-categories" name="categories" placeholder="Fantasy, Mystery, History…" /></div>
-            <div class="field field-wide"><label for="book-cover">Cover image URL</label><input id="book-cover" name="coverUrl" type="url" /></div>
+            <div class="field field-wide"><label for="book-cover">Cover image URL</label><input id="book-cover" name="coverUrl" inputmode="url" /></div>
             <div class="field"><label for="book-status">Reading status</label><select id="book-status" name="readingStatus"><option value="unread">Want to read</option><option value="reading">Reading now</option><option value="read">Finished</option><option value="dnf">Did not finish</option></select></div>
             <div class="field"><label for="book-rating">Rating</label><select id="book-rating" name="rating"><option value="">Not rated</option><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option></select></div>
             <div class="field field-wide"><label for="book-description">Description</label><textarea id="book-description" name="description" rows="4"></textarea></div>
@@ -175,6 +175,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
-    <script type="module" src="/app.js?v=1.3.0"></script>
+    <script type="module" src="/app.js?v=1.4.0"></script>
   </body>
 </html>

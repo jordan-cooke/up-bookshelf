@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeGoogleBook, normalizeOpenLibraryBook } from "../src/metadata.js";
+import { mergeBookMetadata, normalizeGoogleBook, normalizeOpenLibraryBook } from "../src/metadata.js";
 
 test("normalizes Google Books metadata and upgrades cover URLs", () => {
   const result = normalizeGoogleBook(
@@ -35,9 +35,49 @@ test("normalizes Open Library metadata", () => {
       },
     },
     "9780306406157",
+    {
+      covers: [15107046],
+      languages: [{ key: "/languages/eng" }],
+      works: [{ key: "/works/OL39663865W" }],
+    },
+    {
+      description: { value: "A complete work-level description." },
+    },
   );
 
   assert.equal(result.title, "Example Book");
   assert.equal(result.publisher, "Example Press");
   assert.deepEqual(result.authors, ["Example Author"]);
+  assert.equal(result.description, "A complete work-level description.");
+  assert.equal(result.language, "eng");
+  assert.equal(result.coverCandidates[0], "https://covers.openlibrary.org/b/id/15107046.jpg?default=false");
+});
+
+test("merges providers so richer descriptions and cover choices are retained", () => {
+  const result = mergeBookMetadata(
+    {
+      title: "Quicksilver",
+      authors: ["Callie Hart"],
+      description: "A richer synopsis.",
+      coverUrl: "https://books.google.com/cover.jpg",
+      coverCandidates: ["https://books.google.com/cover.jpg"],
+      categories: ["Fantasy"],
+      metadataSource: "Google Books",
+    },
+    {
+      title: "Quicksilver",
+      publisher: "Hodder & Stoughton",
+      description: "",
+      coverUrl: "https://covers.openlibrary.org/cover.jpg",
+      coverCandidates: ["https://covers.openlibrary.org/cover.jpg"],
+      categories: ["Alternate Worlds"],
+      metadataSource: "Open Library",
+    },
+  );
+
+  assert.equal(result.description, "A richer synopsis.");
+  assert.equal(result.publisher, "Hodder & Stoughton");
+  assert.deepEqual(result.categories, ["Fantasy", "Alternate Worlds"]);
+  assert.equal(result.coverCandidates.length, 2);
+  assert.equal(result.metadataSource, "Google Books + Open Library");
 });

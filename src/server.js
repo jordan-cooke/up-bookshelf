@@ -10,6 +10,8 @@ const config = {
   databasePath: process.env.DB_PATH || path.resolve("data", "bookshelf.sqlite"),
 };
 
+config.coverDirectory = process.env.COVER_PATH || path.join(path.dirname(config.databasePath), "covers");
+
 fs.mkdirSync(path.dirname(config.databasePath), { recursive: true });
 const database = new DatabaseSync(config.databasePath, { timeout: 5000 });
 initializeDatabase(database);
@@ -17,10 +19,12 @@ initializeDatabase(database);
 const app = createApp({
   database,
   trustProxy: config.trustProxy,
+  coverDirectory: config.coverDirectory,
 });
 const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(`JnC Bookshelf is listening on port ${config.port}.`);
   console.log(`SQLite database: ${config.databasePath}`);
+  console.log(`Cover cache: ${config.coverDirectory}`);
 });
 
 function shutDown(signal) {

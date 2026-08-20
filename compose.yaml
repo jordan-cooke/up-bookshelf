@@ -12,5 +12,6 @@ services:
       NODE_ENV: production
       DB_PATH: /data/bookshelf.sqlite
       TRUST_PROXY: "${TRUST_PROXY:-0}"
+      GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
     volumes:
       - "${APP_DATA_PATH:-./data}:/data"

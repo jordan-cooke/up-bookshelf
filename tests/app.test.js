@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { initializeDatabase } from "../src/repository.js";
@@ -31,11 +34,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "JnC Bookshelf",
-      version: "1.3.0",
+      version: "1.4.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.3.0");
+    assert.equal(health.headers.get("x-jnc-bookshelf-version"), "1.4.0");
 
     const response = await fetch(`${baseUrl}/api/books?sort=title&order=asc`);
     assert.equal(response.status, 200);
@@ -51,15 +54,15 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=1\.3\.0/);
+    assert.match(html, /styles\.css\?v=1\.4\.0/);
     assert.match(html, /capture="environment"/);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.3.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=1.4.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     assert.match(await stylesheet.text(), /\.site-header/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=1.3.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=1.4.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     assert.match(await script.text(), /scanBarcodePhoto/);
@@ -176,4 +179,21 @@ test("the local library does not require authentication", async () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("www-authenticate"), null);
   });
+});
+
+test("serves cached covers from the persistent data directory", async () => {
+  const coverDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jnc-app-covers-"));
+  try {
+    await fs.promises.writeFile(path.join(coverDirectory, "9781399745413.jpg"), Buffer.alloc(2048, 1));
+    await withServer({ coverDirectory }, async (baseUrl) => {
+      const cover = await fetch(`${baseUrl}/api/covers/9781399745413.jpg`);
+      assert.equal(cover.status, 200);
+      assert.equal(cover.headers.get("content-type"), "image/jpeg");
+      assert.match(cover.headers.get("cache-control"), /immutable/);
+      assert.equal((await cover.arrayBuffer()).byteLength, 2048);
+      assert.equal((await fetch(`${baseUrl}/api/covers/not-a-cover.jpg`)).status, 404);
+    });
+  } finally {
+    await fs.promises.rm(coverDirectory, { recursive: true, force: true });
+  }
 });

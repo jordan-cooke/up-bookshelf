@@ -6,7 +6,8 @@ A private, self-hosted home library designed for a phone. Scan the ISBN barcode 
 
 - Scans ISBN barcodes with the phone camera
 - Offers photo upload/capture and manual ISBN entry as fallbacks
-- Fetches title, author, cover, description, publisher, page count, and categories from Google Books, then Open Library
+- Fetches title, author, cover, description, publisher, page count, and categories from Google Books and Open Library
+- Saves fetched cover art in the persistent appdata volume so phones load it directly from JnC Bookshelf
 - Prevents duplicate ISBNs
 - Searches by title, author, publisher, or ISBN
 - Sorts by date added, title, author, rating, or publication date
@@ -15,7 +16,7 @@ A private, self-hosted home library designed for a phone. Scan the ISBN barcode 
 - Exports the collection as JSON
 - Installs to a phone home screen as a PWA
 
-Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, and embedded SQLite support. No separate database container is required. The server makes outbound requests to Google Books and Open Library when it looks up an ISBN, but the library, ratings, and notes stay in the SQLite database on your Unraid server.
+Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, and embedded SQLite support. No separate database container is required. The server makes outbound requests to Google Books and Open Library when it looks up an ISBN, but the library, cover cache, ratings, and notes stay in the mounted appdata directory on your Unraid server.
 
 ## Unraid quick start
 
@@ -53,6 +54,20 @@ The simplest Unraid deployment uses Docker directly and does not require Compose
 The first build can take a minute. The app automatically creates `/mnt/user/appdata/jnc-bookshelf/data/bookshelf.sqlite`; that file remains in place across container replacements and updates. No username or password is required on the local network.
 
 The included `compose.yaml` is optional for users with Compose Manager. Copy `.env.example` to `.env`, set `APP_DATA_PATH=/mnt/user/appdata/jnc-bookshelf/data`, and run `docker compose up -d --build`.
+
+Open Library works without a key. For additional metadata and cover coverage, create a Google Books API key, then add it to `.env` before recreating the container:
+
+```dotenv
+GOOGLE_BOOKS_API_KEY=your_google_books_api_key
+```
+
+The key remains a server-side Docker environment variable and is never sent to the phone. A Google key is optional; JnC Bookshelf follows Open Library edition records to their work records so descriptions are still populated when Open Library has them.
+
+If you use the direct `docker run` deployment instead of Compose, pass the same key when recreating the container:
+
+```bash
+-e GOOGLE_BOOKS_API_KEY='your_google_books_api_key' \
+```
 
 ## HTTPS and phone camera access
 
@@ -125,7 +140,7 @@ Replacing the container does not remove the library: the SQLite database remains
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 1.3.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.3.0","storage":"sqlite","authentication":false}`. It automatically looks up a valid ISBN through Google Books and Open Library, including the best available cover image. The scanner accepts Bookland ISBN barcodes beginning with `978` or `979` and rejects unrelated retail/product barcodes instead of opening an empty form. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
+Release 1.4.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.4.0","storage":"sqlite","authentication":false}`. It automatically looks up a valid ISBN through Google Books and Open Library, follows Open Library work records for richer descriptions, and caches the first valid cover under `/data/covers`. The scanner accepts Bookland ISBN barcodes beginning with `978` or `979` and rejects unrelated retail/product barcodes instead of opening an empty form. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
 
 Useful commands:
 
@@ -166,4 +181,6 @@ bookshelf/
 
 ## Metadata notes
 
-Book data is matched by ISBN. Some older, self-published, or very new books may not exist in either provider, and occasional editions have incomplete covers or descriptions. When that happens, the app opens a prefilled manual form so the book can still be added and edited.
+Book data is matched by ISBN. Open Library is always queried and needs no key. If `GOOGLE_BOOKS_API_KEY` is configured, Google Books is queried too and the best fields from both results are merged. Cover downloads are restricted to the configured book providers, validated as real images, limited to 8 MB, and stored in `/data/covers` so the phone does not need to hot-link provider images.
+
+Some older, self-published, or very new books may not exist in either provider, and occasional editions still have incomplete metadata. When that happens, the app opens a prefilled manual form so the book can be added and edited.
