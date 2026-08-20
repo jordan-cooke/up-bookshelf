@@ -18,7 +18,7 @@ import {
 import { validateBook, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "1.2.0";
+export const APP_VERSION = "1.2.1";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
 function numericId(request, response, next) {
@@ -47,6 +47,7 @@ export function createApp({ database, lookup = lookupBookByIsbn, trustProxy = fa
           "script-src": ["'self'"],
           "style-src": ["'self'", "'unsafe-inline'"],
           "worker-src": ["'self'", "blob:"],
+          "upgrade-insecure-requests": null,
         },
       },
     }),

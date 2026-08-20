@@ -125,7 +125,7 @@ Replacing the container does not remove the library: the SQLite database remains
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 1.2.0 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.2.0","storage":"sqlite","authentication":false}`. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
+Release 1.2.1 returns `{"status":"ok","app":"JnC Bookshelf","version":"1.2.1","storage":"sqlite","authentication":false}`. This release also disables forced HTTPS upgrades so CSS, JavaScript, and icons load correctly from a local HTTP address. If the browser still shows an older copy after an update, close the installed home-screen app or tab completely and reopen it.
 
 Useful commands:
 
