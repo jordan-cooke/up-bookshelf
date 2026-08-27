@@ -5,6 +5,7 @@ const SORT_COLUMNS = {
   published: "published_date",
   rating: "rating",
   bookRating: "book_rating",
+  collection: "collection_sort",
   updated: "updated_at",
 };
 
@@ -31,6 +32,7 @@ function mapBook(row) {
     description: row.description || "",
     pageCount: row.page_count,
     categories: parseJson(row.categories),
+    collections: parseJson(row.collections),
     coverUrl: row.cover_url,
     language: row.language || "",
     readingStatus: row.reading_status,
@@ -58,6 +60,8 @@ function valuesFor(book) {
     book.description,
     book.pageCount,
     JSON.stringify(book.categories),
+    JSON.stringify(book.collections),
+    book.collectionSort,
     book.coverUrl,
     book.language,
     book.readingStatus,
@@ -89,6 +93,8 @@ export function initializeDatabase(database) {
       description TEXT NOT NULL DEFAULT '',
       page_count INTEGER CHECK (page_count IS NULL OR page_count >= 0),
       categories TEXT NOT NULL DEFAULT '[]',
+      collections TEXT NOT NULL DEFAULT '[]',
+      collection_sort TEXT NOT NULL DEFAULT '',
       cover_url TEXT,
       language TEXT NOT NULL DEFAULT '',
       reading_status TEXT NOT NULL DEFAULT 'unread'
@@ -119,6 +125,9 @@ export function initializeDatabase(database) {
   if (!columns.has("book_rating")) database.exec("ALTER TABLE books ADD COLUMN book_rating REAL CHECK (book_rating IS NULL OR book_rating BETWEEN 1 AND 5)");
   if (!columns.has("book_ratings_count")) database.exec("ALTER TABLE books ADD COLUMN book_ratings_count INTEGER CHECK (book_ratings_count IS NULL OR book_ratings_count >= 0)");
   if (!columns.has("book_rating_source")) database.exec("ALTER TABLE books ADD COLUMN book_rating_source TEXT NOT NULL DEFAULT ''");
+  if (!columns.has("collections")) database.exec("ALTER TABLE books ADD COLUMN collections TEXT NOT NULL DEFAULT '[]'");
+  if (!columns.has("collection_sort")) database.exec("ALTER TABLE books ADD COLUMN collection_sort TEXT NOT NULL DEFAULT ''");
+  database.exec("CREATE INDEX IF NOT EXISTS books_collection_index ON books (collection_sort)");
 }
 
 export function getAppSettings(database) {
@@ -157,17 +166,22 @@ export function deleteAppSettings(database, keys) {
 export function listBooks(database, options = {}) {
   const search = String(options.search || "").trim();
   const status = ["unread", "reading", "read", "dnf"].includes(options.status) ? options.status : "";
+  const collection = String(options.collection || "").trim();
   const where = [];
   const parameters = [];
 
   if (search) {
-    where.push("(title LIKE ? OR subtitle LIKE ? OR author_sort LIKE ? OR publisher LIKE ? OR isbn_10 LIKE ? OR isbn_13 LIKE ?)");
+    where.push("(title LIKE ? OR subtitle LIKE ? OR author_sort LIKE ? OR publisher LIKE ? OR isbn_10 LIKE ? OR isbn_13 LIKE ? OR collections LIKE ?)");
     const pattern = `%${search}%`;
-    parameters.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    parameters.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
   }
   if (status) {
     where.push("reading_status = ?");
     parameters.push(status);
+  }
+  if (collection) {
+    where.push("EXISTS (SELECT 1 FROM json_each(books.collections) WHERE value = ? COLLATE NOCASE)");
+    parameters.push(collection);
   }
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -186,6 +200,21 @@ export function getBook(database, id) {
   return mapBook(database.prepare("SELECT * FROM books WHERE id = ?").get(id));
 }
 
+export function listCollections(database) {
+  const counts = new Map();
+  for (const row of database.prepare("SELECT collections FROM books").all()) {
+    for (const name of parseJson(row.collections)) {
+      const label = String(name || "").trim();
+      if (!label) continue;
+      const key = label.toLocaleLowerCase();
+      const current = counts.get(key) || { name: label, count: 0 };
+      current.count += 1;
+      counts.set(key, current);
+    }
+  }
+  return [...counts.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
 export function findByIsbn(database, isbn) {
   return mapBook(database.prepare("SELECT * FROM books WHERE isbn_10 = ? OR isbn_13 = ? LIMIT 1").get(isbn, isbn));
 }
@@ -194,9 +223,9 @@ export function createBook(database, book) {
   const result = database.prepare(`
     INSERT INTO books (
       title, subtitle, authors, author_sort, isbn_10, isbn_13, publisher, published_date,
-      description, page_count, categories, cover_url, language, reading_status, rating,
+      description, page_count, categories, collections, collection_sort, cover_url, language, reading_status, rating,
       book_rating, book_ratings_count, book_rating_source, notes, metadata_source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(...valuesFor(book));
   return getBook(database, result.lastInsertRowid);
 }
@@ -205,7 +234,7 @@ export function updateBook(database, id, book) {
   const result = database.prepare(`
     UPDATE books SET
       title = ?, subtitle = ?, authors = ?, author_sort = ?, isbn_10 = ?, isbn_13 = ?, publisher = ?, published_date = ?,
-      description = ?, page_count = ?, categories = ?, cover_url = ?, language = ?, reading_status = ?, rating = ?,
+      description = ?, page_count = ?, categories = ?, collections = ?, collection_sort = ?, cover_url = ?, language = ?, reading_status = ?, rating = ?,
       book_rating = ?, book_ratings_count = ?, book_rating_source = ?, notes = ?, metadata_source = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(...valuesFor(book), id);

@@ -14,7 +14,10 @@ function testDatabase() {
 }
 
 async function withServer(options, callback) {
-  const database = testDatabase();
+  const database = options.databasePath
+    ? new DatabaseSync(options.databasePath, { timeout: 1000 })
+    : testDatabase();
+  if (options.databasePath) initializeDatabase(database);
   const app = createApp({ database, ...options });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
@@ -34,11 +37,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.3.1",
+      version: "2.4.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.3.1");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.4.0");
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -58,7 +61,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.3\.1/);
+    assert.match(html, /styles\.css\?v=2\.4\.0/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
@@ -73,26 +76,34 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(html, /id="amazon-cookie"/);
     assert.match(html, /id="test-amazon-cookie"/);
     assert.match(html, /id="continuous-scan"/);
+    assert.match(html, /id="book-details-dialog"/);
+    assert.match(html, /id="collection-filter"/);
+    assert.match(html, /id="book-collections"/);
+    assert.match(html, /id="export-dialog"/);
     assert.match(html, /Simpler · less secure/);
     assert.match(html, /More secure · stable/);
     assert.match(html, />Book rating</);
     assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.3.1`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.4.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     const css = await stylesheet.text();
     assert.match(css, /\.site-header/);
     assert.match(css, /\.tagline-hidden \.hero/);
     assert.match(css, /\.metadata-result-grid/);
+    assert.match(css, /\.details-hero/);
+    assert.match(css, /\.export-options/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.3.1`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.4.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     const javascript = await script.text();
     assert.match(javascript, /scanBarcodePhoto/);
     assert.match(javascript, /resumeContinuousScanning/);
     assert.match(javascript, /displayCoverUrl/);
+    assert.match(javascript, /openBookDetails/);
+    assert.match(javascript, /loadCollections/);
 
     const icon = await fetch(`${baseUrl}/icon.svg`);
     assert.equal(icon.status, 200);
@@ -123,6 +134,7 @@ test("creates, searches, updates, and deletes a SQLite-backed book", async () =>
         bookRating: 4.6,
         bookRatingsCount: 1204,
         bookRatingSource: "Google Books",
+        collections: ["Earthsea", "Fantasy favorites"],
       }),
     });
     assert.equal(createResponse.status, 201);
@@ -132,11 +144,20 @@ test("creates, searches, updates, and deletes a SQLite-backed book", async () =>
     assert.equal(created.bookRating, 4.6);
     assert.equal(created.bookRatingsCount, 1204);
     assert.equal(created.bookRatingSource, "Google Books");
+    assert.deepEqual(created.collections, ["Earthsea", "Fantasy favorites"]);
 
     const searchResponse = await fetch(`${baseUrl}/api/books?q=Earthsea`);
     const search = await searchResponse.json();
     assert.equal(search.total, 1);
     assert.equal(search.books[0].title, "A Wizard of Earthsea");
+
+    const collections = await (await fetch(`${baseUrl}/api/collections`)).json();
+    assert.deepEqual(collections.collections, [
+      { name: "Earthsea", count: 1 },
+      { name: "Fantasy favorites", count: 1 },
+    ]);
+    const collectionFilter = await (await fetch(`${baseUrl}/api/books?collection=${encodeURIComponent("Earthsea")}&sort=collection&order=asc`)).json();
+    assert.equal(collectionFilter.total, 1);
 
     const statsBeforeUpdate = await (await fetch(`${baseUrl}/api/stats`)).json();
     assert.deepEqual(statsBeforeUpdate, { total: 1, read: 0, reading: 1, unread: 0 });
@@ -158,6 +179,34 @@ test("creates, searches, updates, and deletes a SQLite-backed book", async () =>
     assert.equal((await fetch(`${baseUrl}/api/books/${created.id}`, { method: "DELETE" })).status, 204);
     assert.equal((await (await fetch(`${baseUrl}/api/books`)).json()).total, 0);
   });
+});
+
+test("exports a styled Excel catalog and the complete SQLite database", async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-export-test-"));
+  const databasePath = path.join(directory, "bookshelf.sqlite");
+  try {
+    await withServer({ databasePath }, async (baseUrl) => {
+      await fetch(`${baseUrl}/api/books`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Parable of the Sower", authors: ["Octavia E. Butler"], collections: ["Earthseed"] }),
+      });
+      const excel = await fetch(`${baseUrl}/api/export/excel`);
+      assert.equal(excel.status, 200);
+      assert.match(excel.headers.get("content-type"), /spreadsheetml/);
+      assert.match(excel.headers.get("content-disposition"), /\.xlsx/);
+      const excelBytes = Buffer.from(await excel.arrayBuffer());
+      assert.equal(excelBytes.subarray(0, 2).toString(), "PK");
+      assert.ok(excelBytes.length > 5000);
+
+      const sqlite = await fetch(`${baseUrl}/api/export/database`);
+      assert.equal(sqlite.status, 200);
+      assert.match(sqlite.headers.get("content-disposition"), /\.sqlite/);
+      assert.equal(Buffer.from(await sqlite.arrayBuffer()).subarray(0, 16).toString(), "SQLite format 3\u0000");
+    });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("looks up a valid ISBN and returns normalized book details", async () => {

@@ -20,6 +20,7 @@ const app = createApp({
   database,
   trustProxy: config.trustProxy,
   coverDirectory: config.coverDirectory,
+  databasePath: config.databasePath,
 });
 const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(`UP Bookshelf is listening on port ${config.port}.`);

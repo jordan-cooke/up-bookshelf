@@ -13,6 +13,7 @@ test("normalizes a valid book payload", () => {
     bookRatingSource: "Google Books",
     readingStatus: "read",
     categories: "Science Fiction, Classics",
+    collections: "Hainish Cycle, Favorites, Hainish Cycle",
   });
 
   assert.equal(book.title, "The Left Hand of Darkness");
@@ -23,6 +24,8 @@ test("normalizes a valid book payload", () => {
   assert.equal(book.bookRatingsCount, 782);
   assert.equal(book.bookRatingSource, "Google Books");
   assert.deepEqual(book.categories, ["Science Fiction", "Classics"]);
+  assert.deepEqual(book.collections, ["Hainish Cycle", "Favorites"]);
+  assert.equal(book.collectionSort, "Hainish Cycle");
 });
 
 test("rejects missing titles and malformed ISBNs", () => {

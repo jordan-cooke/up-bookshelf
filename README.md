@@ -10,16 +10,19 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Lets the user choose any detected phone camera and remembers that choice
 - Suggests a likely rear/main camera without forcing it
 - Offers a flashlight control when the selected camera and browser support it
-- Retries captured photos with an enhanced, high-contrast image
+- Scans a larger live-camera region at a higher frame rate and requests continuous focus when the browser supports it
+- Retries captured photos with full-frame and focused, high-contrast image passes
 - Rejects retail/product barcodes and the small five-digit price supplement
 - Looks up multiple editions through Open Library, Google Books, and either optional Amazon connection method
 - Shows every cover returned by the configured providers and lets the user upload a custom cover
 - Compares provider descriptions and individual fields before saving
 - Removes Google’s `edge=curl` cover treatment and caches the selected cover locally
+- Opens every book into a dedicated details view with its synopsis, ratings, publication facts, genres, collections, and notes
 - Edits existing books and refreshes their provider choices at any time
+- Creates custom collections and filters or sorts the shelf by collection
 - Searches, sorts, filters, and tracks reading status
 - Keeps provider/community book ratings separate from the reader's own star rating
-- Stores private notes and exports the library as JSON
+- Stores private notes and exports the library as JSON, a formatted Excel workbook, or the complete SQLite database
 - Includes light and dark themes
 - Lets the owner change the bookshelf name and welcome message in the app
 - Installs to a phone home screen as a PWA
@@ -140,9 +143,15 @@ Every book form has **Choose from providers** and **Upload your own cover** cont
 
 For a book already on the shelf, open the book and select **Choose from providers** or **Compare providers**. When a provider cover is selected and the book is saved, the server validates and downloads the image to `/data/covers`. A custom upload is resized in the browser, converted to JPEG, stored in the same persistent directory, and immediately attached to an existing book. Amazon images are refreshed after the provider's one-day cache window; other provider and uploaded covers remain local until you choose a replacement.
 
-## Backups
+## Exports and backups
 
-The download icon exports a human-readable JSON backup. For a complete restorable backup, include:
+The download icon in the app offers three formats:
+
+- **Excel workbook:** a formatted and filterable Books sheet plus a Summary sheet with reading-status and collection totals.
+- **Book backup:** human-readable JSON containing the book catalog only. Provider credentials are excluded.
+- **Complete SQLite database:** a restorable copy of the live database, including books, personalization, settings, API keys, and any saved Amazon cookie. Protect this file like a password.
+
+For automated server backups, include:
 
 ```text
 /mnt/user/appdata/up-bookshelf/data
@@ -178,7 +187,7 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.3.1 routes approved provider-cover previews through the Bookshelf server so they display consistently on iPhone over Tailscale HTTPS. It also accepts Grimmory-style bare Amazon session IDs. Release 2.3.0 added verifiable saved-cookie status and continuous scanning. Existing books, covers, settings, and secrets are preserved automatically.
+Release 2.4.0 adds a dedicated book-details experience, persistent collections with shelf filtering and sorting, Excel and live SQLite exports, and faster multi-pass barcode scanning. Existing books, covers, settings, and secrets are migrated and preserved automatically.
 
 ## Local development
 

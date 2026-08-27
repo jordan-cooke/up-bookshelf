@@ -4,11 +4,15 @@ const elements = {
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search"),
   status: document.querySelector("#status-filter"),
+  collection: document.querySelector("#collection-filter"),
+  collectionSuggestions: document.querySelector("#collection-suggestions"),
   sort: document.querySelector("#sort"),
   brandName: document.querySelector("#brand-name"),
   brandLink: document.querySelector(".brand"),
   welcomeTitle: document.querySelector("#welcome-title"),
   settingsButton: document.querySelector("#settings-button"),
+  exportButton: document.querySelector("#export-button"),
+  exportDialog: document.querySelector("#export-dialog"),
   settingsDialog: document.querySelector("#settings-dialog"),
   settingsForm: document.querySelector("#settings-form"),
   settingsError: document.querySelector("#settings-error"),
@@ -32,6 +36,11 @@ const elements = {
   lookupProgress: document.querySelector("#lookup-progress"),
   lookupProgressLabel: document.querySelector("#lookup-progress-label"),
   bookDialog: document.querySelector("#book-dialog"),
+  detailsDialog: document.querySelector("#book-details-dialog"),
+  detailsHeading: document.querySelector("#details-heading"),
+  detailsContent: document.querySelector("#book-details-content"),
+  detailsEdit: document.querySelector("#details-edit"),
+  detailsMetadata: document.querySelector("#details-metadata"),
   bookForm: document.querySelector("#book-form"),
   formError: document.querySelector("#form-error"),
   deleteBook: document.querySelector("#delete-book"),
@@ -77,6 +86,7 @@ let metadataResults = [];
 let selectedMetadataResult = -1;
 let scannerInputMode = "";
 let pendingContinuousScanMode = "";
+let activeDetailBook = null;
 let appConfig = { brandName: "UP", appName: "UP Bookshelf", customName: "", tagline: "Every good story,\nright where you left it." };
 
 function escapeHtml(value = "") {
@@ -116,6 +126,11 @@ function toast(message, kind = "success") {
 
 function statusLabel(status) {
   return { unread: "Want to read", reading: "Reading now", read: "Finished", dnf: "Did not finish" }[status] || status;
+}
+
+function ratingStars(value) {
+  const rating = Number(value);
+  return Number.isFinite(rating) && rating > 0 ? `${rating.toFixed(1)} ★` : "Not rated";
 }
 
 function applyTheme(theme, persist = true) {
@@ -268,16 +283,20 @@ function bookCard(book) {
     : `<span class="cover-placeholder"><b>${escapeHtml(book.title.slice(0, 1))}</b><small>${escapeHtml(book.title)}</small></span>`;
   const userRating = book.rating ? `<span class="card-rating" aria-label="Your rating: ${book.rating} out of 5 stars"><b>Yours</b> ${"★".repeat(book.rating)}${"☆".repeat(5 - book.rating)}</span>` : "";
   const bookRating = book.bookRating ? `<span class="card-book-rating" aria-label="Book rating: ${book.bookRating} out of 5"><b>Book</b> ${Number(book.bookRating).toFixed(1)} ★</span>` : "";
+  const collection = book.collections?.[0]
+    ? `<span class="collection-badge">${escapeHtml(book.collections[0])}</span>`
+    : "";
 
   return `
     <article class="book-card">
-      <button class="book-cover" type="button" data-action="edit" data-id="${book.id}" aria-label="View ${escapeHtml(book.title)}">
+      <button class="book-cover" type="button" data-action="view" data-id="${book.id}" aria-label="View ${escapeHtml(book.title)}">
         ${cover}
         <span class="status-badge status-${escapeHtml(book.readingStatus)}">${escapeHtml(statusLabel(book.readingStatus))}</span>
       </button>
       <div class="book-info">
-        <h3><button type="button" data-action="edit" data-id="${book.id}">${escapeHtml(book.title)}</button></h3>
+        <h3><button type="button" data-action="view" data-id="${book.id}">${escapeHtml(book.title)}</button></h3>
         <p>${escapeHtml(author)}</p>
+        ${collection}
         <span class="card-ratings">${bookRating}${userRating}</span>
       </div>
     </article>`;
@@ -296,13 +315,14 @@ async function loadBooks() {
   const parameters = new URLSearchParams({ sort, order });
   if (elements.search.value.trim()) parameters.set("q", elements.search.value.trim());
   if (elements.status.value) parameters.set("status", elements.status.value);
+  if (elements.collection.value) parameters.set("collection", elements.collection.value);
 
   try {
     const data = await api(`/api/books?${parameters}`);
     elements.grid.innerHTML = data.books.map(bookCard).join("");
     elements.grid.hidden = data.books.length === 0;
     elements.empty.hidden = data.books.length !== 0;
-    const filtered = elements.search.value.trim() || elements.status.value;
+    const filtered = elements.search.value.trim() || elements.status.value || elements.collection.value;
     elements.empty.querySelector("h3").textContent = filtered ? "No books found" : "Your shelves are waiting";
     elements.empty.querySelector("p").textContent = filtered
       ? "Try a different search or clear the filter."
@@ -313,6 +333,75 @@ async function loadBooks() {
     elements.count.textContent = "Unable to load";
   } finally {
     elements.grid.setAttribute("aria-busy", "false");
+  }
+}
+
+async function loadCollections() {
+  try {
+    const selected = elements.collection.value;
+    const { collections } = await api("/api/collections");
+    elements.collection.innerHTML = `<option value="">All collections</option>${collections.map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)} (${item.count})</option>`).join("")}`;
+    if (collections.some((item) => item.name === selected)) elements.collection.value = selected;
+    elements.collectionSuggestions.innerHTML = collections.map((item) => `<option value="${escapeHtml(item.name)}"></option>`).join("");
+  } catch {
+    // Collection filtering remains optional if this request is interrupted.
+  }
+}
+
+function detailValue(label, value) {
+  if (value === "" || value == null) return "";
+  return `<div class="detail-fact"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
+}
+
+function renderBookDetails(book) {
+  const author = book.authors?.length ? book.authors.join(", ") : "Unknown author";
+  const cover = book.coverUrl
+    ? `<img src="${escapeHtml(displayCoverUrl(book.coverUrl))}" alt="Cover of ${escapeHtml(book.title)}" />`
+    : `<span class="cover-placeholder"><b>${escapeHtml(book.title.slice(0, 1))}</b><small>${escapeHtml(book.title)}</small></span>`;
+  const collectionChips = (book.collections || []).map((name) => `<button type="button" data-filter-collection="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("");
+  const categoryChips = (book.categories || []).map((name) => `<span>${escapeHtml(name)}</span>`).join("");
+  const communityRating = book.bookRating
+    ? `${ratingStars(book.bookRating)}${book.bookRatingsCount ? ` from ${Number(book.bookRatingsCount).toLocaleString()} ratings` : ""}${book.bookRatingSource ? ` · ${book.bookRatingSource}` : ""}`
+    : "Not available";
+  elements.detailsHeading.textContent = book.title;
+  elements.detailsContent.innerHTML = `
+    <section class="details-hero">
+      <div class="details-cover">${cover}</div>
+      <div class="details-summary">
+        <span class="details-status status-${escapeHtml(book.readingStatus)}">${escapeHtml(statusLabel(book.readingStatus))}</span>
+        <h3>${escapeHtml(book.title)}</h3>
+        ${book.subtitle ? `<p class="details-subtitle">${escapeHtml(book.subtitle)}</p>` : ""}
+        <p class="details-author">${escapeHtml(author)}</p>
+        ${collectionChips ? `<div class="detail-chips detail-collections" aria-label="Collections">${collectionChips}</div>` : ""}
+        <div class="details-ratings"><span><small>Book rating</small><strong>${escapeHtml(communityRating)}</strong></span><span><small>Your rating</small><strong>${escapeHtml(book.rating ? `${book.rating} / 5 ★` : "Not rated")}</strong></span></div>
+      </div>
+    </section>
+    <dl class="detail-facts">
+      ${detailValue("ISBN-13", book.isbn13)}
+      ${detailValue("ISBN-10", book.isbn10)}
+      ${detailValue("Publisher", book.publisher)}
+      ${detailValue("Published", book.publishedDate)}
+      ${detailValue("Pages", book.pageCount)}
+      ${detailValue("Language", book.language)}
+      ${detailValue("Metadata", book.metadataSource)}
+      ${detailValue("Added", book.createdAt)}
+    </dl>
+    ${book.description ? `<section class="details-section"><p class="eyebrow">About this book</p><h3>Synopsis</h3><p>${escapeHtml(book.description)}</p></section>` : ""}
+    ${categoryChips ? `<section class="details-section"><p class="eyebrow">Genres & subjects</p><div class="detail-chips">${categoryChips}</div></section>` : ""}
+    ${book.notes ? `<section class="details-section details-notes"><p class="eyebrow">Personal notes</p><p>${escapeHtml(book.notes)}</p></section>` : ""}`;
+}
+
+async function openBookDetails(id) {
+  activeDetailBook = null;
+  elements.detailsHeading.textContent = "Book details";
+  elements.detailsContent.innerHTML = `<div class="details-loading"><span class="spinner" aria-hidden="true"></span><span>Opening your book…</span></div>`;
+  if (!elements.detailsDialog.open) elements.detailsDialog.showModal();
+  try {
+    activeDetailBook = await api(`/api/books/${id}`);
+    renderBookDetails(activeDetailBook);
+  } catch (error) {
+    elements.detailsDialog.close();
+    toast(error.message, "error");
   }
 }
 
@@ -381,8 +470,8 @@ function chooseRecommendedCamera(cameras) {
 }
 
 function scanBox(viewWidth, viewHeight) {
-  const width = Math.floor(Math.min(viewWidth * 0.88, 680));
-  const height = Math.floor(Math.min(viewHeight * 0.28, 210));
+  const width = Math.floor(Math.min(viewWidth * 0.93, 720));
+  const height = Math.floor(Math.min(viewHeight * 0.36, 260));
   return { width: width - (width % 2), height: height - (height % 2) };
 }
 
@@ -396,7 +485,7 @@ async function startSelectedCamera(cameraId) {
   try {
     await scanner.start(
       cameraId,
-      { fps: 15, qrbox: scanBox, aspectRatio: 1.777, disableFlip: true },
+      { fps: 24, qrbox: scanBox, aspectRatio: 1.777, disableFlip: true },
       (decodedText) => lookupIsbn(decodedText, "live"),
       () => {},
     );
@@ -405,6 +494,9 @@ async function startSelectedCamera(cameraId) {
     let capabilities = {};
     try { capabilities = scanner.getRunningTrackCapabilities() || {}; } catch { /* Browser does not expose capabilities. */ }
     elements.torchButton.hidden = !capabilities.torch;
+    if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
+      try { await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch { /* The selected browser may reject optional focus controls. */ }
+    }
   } catch (error) {
     await disposeScanner();
     elements.scanActions.hidden = false;
@@ -457,18 +549,30 @@ async function toggleTorch() {
   }
 }
 
-async function enhancedPhoto(file) {
+async function enhancedPhotos(file) {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(2.5, Math.max(0.3, 2000 / bitmap.width));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  context.filter = "grayscale(1) contrast(1.65)";
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const makeVariant = async (source, name) => {
+    const scale = Math.min(2.8, Math.max(0.3, 2200 / source.width));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(source.width * scale);
+    canvas.height = Math.round(source.height * scale);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.filter = "grayscale(1) contrast(1.75)";
+    context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.94));
+    return blob ? new File([blob], name, { type: "image/jpeg" }) : null;
+  };
+  const full = await makeVariant({ x: 0, y: 0, width: bitmap.width, height: bitmap.height }, "enhanced-isbn.jpg");
+  const focused = await makeVariant({
+    x: Math.round(bitmap.width * 0.04),
+    y: Math.round(bitmap.height * 0.2),
+    width: Math.round(bitmap.width * 0.92),
+    height: Math.round(bitmap.height * 0.72),
+  }, "focused-isbn.jpg");
   bitmap.close();
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.94));
-  return blob ? new File([blob], "enhanced-isbn.jpg", { type: "image/jpeg" }) : null;
+  return [full, focused].filter(Boolean);
 }
 
 async function detectWithBrowser(file) {
@@ -512,11 +616,14 @@ async function scanBarcodePhoto(file) {
   elements.lookupProgress.hidden = false;
   elements.lookupProgressLabel.textContent = "Reading the ISBN barcode…";
   try {
-    const enhanced = window.createImageBitmap ? await enhancedPhoto(file).catch(() => null) : null;
-    const variants = [file, enhanced].filter(Boolean);
     let decodedText = null;
-    for (const variant of variants) {
-      decodedText = await detectWithBrowser(variant);
+    decodedText = await detectWithBrowser(file);
+    const variants = [file];
+    if (!decodedText && window.createImageBitmap) {
+      variants.push(...await enhancedPhotos(file).catch(() => []));
+    }
+    for (const [index, variant] of variants.entries()) {
+      if (!decodedText && index > 0) decodedText = await detectWithBrowser(variant);
       if (decodedText) break;
       try {
         decodedText = await scanFileWithLibrary(variant);
@@ -562,7 +669,7 @@ async function lookupIsbn(rawValue, source = scannerInputMode || "manual") {
     if (result.existing) {
       toast("That book is already on your shelf.", "info");
       if (continueMode) resumeContinuousScanning(continueMode);
-      else openBookForm(result.existing);
+      else openBookDetails(result.existing.id);
     } else {
       openBookForm({ ...result.book, readingStatus: "unread" }, result.providers || [], continueMode);
     }
@@ -699,6 +806,7 @@ function openBookForm(book = {}, providers = [], continuousMode = "") {
     pageCount: book.pageCount,
     language: book.language,
     categories: Array.isArray(book.categories) ? book.categories.join(", ") : book.categories,
+    collections: Array.isArray(book.collections) ? book.collections.join(", ") : book.collections,
     coverUrl: book.coverUrl,
     readingStatus: book.readingStatus || "unread",
     rating: book.rating,
@@ -931,6 +1039,7 @@ function formBookData() {
   const data = Object.fromEntries(new FormData(elements.bookForm));
   data.authors = data.authors.split(",").map((item) => item.trim()).filter(Boolean);
   data.categories = data.categories.split(",").map((item) => item.trim()).filter(Boolean);
+  data.collections = data.collections.split(",").map((item) => item.trim()).filter(Boolean);
   return data;
 }
 
@@ -969,7 +1078,7 @@ async function saveBook(event) {
     pendingContinuousScanMode = "";
     elements.bookDialog.close();
     toast(editing ? "Book details saved." : "Book added to your shelf.");
-    await Promise.all([loadBooks(), loadStats()]);
+    await Promise.all([loadBooks(), loadStats(), loadCollections()]);
     if (continuousMode) resumeContinuousScanning(continuousMode);
   } catch (error) {
     elements.formError.textContent = error.message;
@@ -988,6 +1097,14 @@ async function editBook(id) {
   }
 }
 
+async function editDetailBook(openMetadata = false) {
+  if (!activeDetailBook) return;
+  const book = activeDetailBook;
+  elements.detailsDialog.close();
+  openBookForm(book);
+  if (openMetadata) await openMetadataComparison();
+}
+
 async function removeBook() {
   const id = elements.bookForm.elements.id.value;
   const title = elements.bookForm.elements.title.value || "this book";
@@ -997,7 +1114,7 @@ async function removeBook() {
     await api(`/api/books/${id}`, { method: "DELETE" });
     elements.bookDialog.close();
     toast("Book removed from your shelf.", "info");
-    await Promise.all([loadBooks(), loadStats()]);
+    await Promise.all([loadBooks(), loadStats(), loadCollections()]);
   } catch (error) {
     toast(error.message, "error");
   } finally {
@@ -1011,8 +1128,16 @@ document.addEventListener("click", (event) => {
     const { action, id } = actionElement.dataset;
     if (action === "scan") openScanner();
     if (action === "add") openBookForm({ readingStatus: "unread" });
+    if (action === "view") openBookDetails(id);
     if (action === "edit") editBook(id);
     if (action === "reload") loadBooks();
+  }
+  const collectionElement = event.target.closest("[data-filter-collection]");
+  if (collectionElement) {
+    elements.collection.value = collectionElement.dataset.filterCollection;
+    elements.detailsDialog.close();
+    loadBooks();
+    document.querySelector("#library").scrollIntoView({ behavior: "smooth" });
   }
   const useResultButton = event.target.closest("[data-use-result]");
   if (useResultButton) selectMetadataResult(Number(useResultButton.dataset.useResult), true);
@@ -1029,6 +1154,9 @@ document.addEventListener("click", (event) => {
 
 elements.themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 elements.settingsButton.addEventListener("click", openSettings);
+elements.exportButton.addEventListener("click", () => elements.exportDialog.showModal());
+elements.detailsEdit.addEventListener("click", () => editDetailBook(false));
+elements.detailsMetadata.addEventListener("click", () => editDetailBook(true));
 elements.settingsForm.addEventListener("submit", saveSettings);
 elements.testAmazonCookie.addEventListener("click", testSavedAmazonCookie);
 elements.settingsForm.elements.taglineEnabled.addEventListener("change", syncTaglineControl);
@@ -1061,6 +1189,7 @@ elements.search.addEventListener("input", () => {
   searchTimer = setTimeout(loadBooks, 250);
 });
 elements.status.addEventListener("change", loadBooks);
+elements.collection.addEventListener("change", loadBooks);
 elements.sort.addEventListener("change", loadBooks);
 elements.scannerDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
@@ -1069,7 +1198,7 @@ elements.scannerDialog.addEventListener("cancel", (event) => {
 elements.scannerDialog.addEventListener("click", (event) => {
   if (event.target === elements.scannerDialog) closeScanner();
 });
-for (const dialog of [elements.bookDialog, elements.metadataDialog, elements.settingsDialog]) {
+for (const dialog of [elements.bookDialog, elements.metadataDialog, elements.settingsDialog, elements.detailsDialog, elements.exportDialog]) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
@@ -1078,4 +1207,4 @@ elements.bookDialog.addEventListener("close", () => { pendingContinuousScanMode 
 
 initializeTheme();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});
-Promise.all([loadConfig(), loadBooks(), loadStats()]);
+Promise.all([loadConfig(), loadBooks(), loadStats(), loadCollections()]);

@@ -6,6 +6,7 @@ import helmet from "helmet";
 import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
 import { checkAmazonCookie, isSupportedAmazonMarketplace, lookupBookMetadata, searchBookMetadata } from "./metadata.js";
 import { cacheBookCover, coverCacheState, fetchProviderCover, saveUploadedCover } from "./covers.js";
+import { createBookshelfWorkbook } from "./excel.js";
 import {
   createBook,
   deleteAppSettings,
@@ -16,6 +17,7 @@ import {
   getBook,
   libraryStats,
   listBooks,
+  listCollections,
   saveAppSettings,
   updateBook,
   updateBookCover,
@@ -23,7 +25,7 @@ import {
 import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.3.1";
+export const APP_VERSION = "2.4.0";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
@@ -98,6 +100,7 @@ export function createApp({
   loadProviderCover = fetchProviderCover,
   trustProxy = false,
   coverDirectory = null,
+  databasePath = null,
 }) {
   const app = express();
   const currentConfig = () => {
@@ -233,6 +236,7 @@ export function createApp({
           status: request.query.status,
           sort: request.query.sort,
           order: request.query.order,
+          collection: request.query.collection,
           limit: request.query.limit,
         }),
       );
@@ -425,6 +429,14 @@ export function createApp({
     }
   });
 
+  app.get("/api/collections", (_request, response, next) => {
+    try {
+      response.json({ collections: listCollections(database) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/export", async (_request, response, next) => {
     try {
       const date = new Date().toISOString().slice(0, 10);
@@ -432,6 +444,38 @@ export function createApp({
       response.json({ version: 1, exportedAt: new Date().toISOString(), books: await exportBooks(database) });
     } catch (error) {
       next(error);
+    }
+  });
+
+  app.get("/api/export/excel", async (_request, response, next) => {
+    try {
+      const exportedAt = new Date();
+      const books = exportBooks(database);
+      const workbook = createBookshelfWorkbook(books, { appName: currentConfig().appName, exportedAt });
+      const bytes = await workbook.xlsx.writeBuffer();
+      const date = exportedAt.toISOString().slice(0, 10);
+      response.set("Cache-Control", "no-store");
+      response.attachment(`bookshelf-library-${date}.xlsx`);
+      response.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      response.send(Buffer.from(bytes));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/export/database", (_request, response, next) => {
+    try {
+      if (!databasePath || !fs.existsSync(databasePath)) {
+        return response.status(503).json({ error: "A full database download is only available from a file-backed bookshelf." });
+      }
+      database.exec("PRAGMA wal_checkpoint(FULL)");
+      const date = new Date().toISOString().slice(0, 10);
+      response.set("Cache-Control", "no-store");
+      return response.download(databasePath, `bookshelf-database-${date}.sqlite`, (error) => {
+        if (error && !response.headersSent) next(error);
+      });
+    } catch (error) {
+      return next(error);
     }
   });
 

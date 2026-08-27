@@ -65,6 +65,8 @@ export function validateBook(input = {}) {
 
   const readingStatus = STATUSES.has(input.readingStatus) ? input.readingStatus : "unread";
 
+  const collections = cleanList(input.collections).slice(0, 30);
+
   return {
     title,
     subtitle: cleanText(input.subtitle, 500),
@@ -77,6 +79,8 @@ export function validateBook(input = {}) {
     description: cleanText(input.description, 20000),
     pageCount,
     categories: cleanList(input.categories),
+    collections,
+    collectionSort: collections[0] || "",
     coverUrl: validateCoverUrl(input.coverUrl),
     language: cleanText(input.language, 30),
     readingStatus,

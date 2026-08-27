@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { createBook, initializeDatabase, listBooks } from "../src/repository.js";
+import { createBook, initializeDatabase, listBooks, listCollections } from "../src/repository.js";
 import { validateBook } from "../src/validation.js";
 
 test("persists the library to a SQLite file across restarts", () => {
@@ -22,6 +22,7 @@ test("persists the library to a SQLite file across restarts", () => {
       bookRating: 4.2,
       bookRatingsCount: 91,
       bookRatingSource: "Google Books",
+      collections: ["Hainish Cycle", "Favorites"],
     }));
     assert.equal(database.prepare("PRAGMA journal_mode").get().journal_mode, "wal");
     database.close();
@@ -35,13 +36,16 @@ test("persists the library to a SQLite file across restarts", () => {
     assert.equal(result.books[0].bookRating, 4.2);
     assert.equal(result.books[0].bookRatingsCount, 91);
     assert.equal(result.books[0].bookRatingSource, "Google Books");
+    assert.deepEqual(result.books[0].collections, ["Hainish Cycle", "Favorites"]);
+    assert.equal(listBooks(database, { collection: "Hainish Cycle" }).total, 1);
+    assert.deepEqual(listCollections(database), [{ name: "Favorites", count: 1 }, { name: "Hainish Cycle", count: 1 }]);
     database.close();
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("adds provider-rating columns to an existing library", () => {
+test("adds provider-rating and collection columns to an existing library", () => {
   const database = new DatabaseSync(":memory:");
   database.exec(`CREATE TABLE books (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,5 +74,7 @@ test("adds provider-rating columns to an existing library", () => {
   assert.equal(columns.has("book_rating"), true);
   assert.equal(columns.has("book_ratings_count"), true);
   assert.equal(columns.has("book_rating_source"), true);
+  assert.equal(columns.has("collections"), true);
+  assert.equal(columns.has("collection_sort"), true);
   database.close();
 });

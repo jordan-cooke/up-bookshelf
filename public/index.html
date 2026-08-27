@@ -7,7 +7,7 @@
     <meta name="description" content="A private, self-hosted home library." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=2.3.1" />
+    <link rel="stylesheet" href="/styles.css?v=2.4.0" />
     <title>UP Bookshelf</title>
   </head>
   <body>
@@ -26,9 +26,9 @@
           <svg class="theme-icon-sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
           <svg class="theme-icon-moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z" /></svg>
         </button>
-        <a class="icon-button export-link" href="/api/export" download title="Download a JSON backup" aria-label="Download backup">
+        <button class="icon-button export-link" id="export-button" type="button" title="Export bookshelf" aria-label="Export bookshelf">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v3h14v-3" /></svg>
-        </a>
+        </button>
         <button class="button button-secondary desktop-add" type="button" data-action="add">Add manually</button>
         <button class="button button-primary" type="button" data-action="scan">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 8v8m3-8v8m3-8v8m3-8v8" /></svg>
@@ -77,6 +77,12 @@
             </select>
           </label>
           <label>
+            <span class="sr-only">Filter by collection</span>
+            <select id="collection-filter">
+              <option value="">All collections</option>
+            </select>
+          </label>
+          <label>
             <span class="sr-only">Sort books</span>
             <select id="sort">
               <option value="added:desc">Newest added</option>
@@ -87,6 +93,8 @@
               <option value="rating:desc">Highest user rating</option>
               <option value="bookRating:desc">Highest book rating</option>
               <option value="published:desc">Newest published</option>
+              <option value="collection:asc">Collection A–Z</option>
+              <option value="collection:desc">Collection Z–A</option>
             </select>
           </label>
         </div>
@@ -155,6 +163,19 @@
       </div>
     </dialog>
 
+    <dialog class="modal details-modal" id="book-details-dialog">
+      <div class="modal-header sticky-modal-header">
+        <div><p class="eyebrow">On your shelf</p><h2 id="details-heading">Book details</h2></div>
+        <button class="close-button" type="button" data-close="book-details-dialog" aria-label="Close book details">×</button>
+      </div>
+      <div class="details-content" id="book-details-content"></div>
+      <div class="modal-actions details-actions">
+        <button class="button button-secondary" id="details-metadata" type="button">Find better metadata</button>
+        <span class="action-spacer"></span>
+        <button class="button button-primary" id="details-edit" type="button">Edit details</button>
+      </div>
+    </dialog>
+
     <dialog class="modal book-modal" id="book-dialog">
       <form id="book-form">
         <div class="modal-header sticky-modal-header">
@@ -187,6 +208,7 @@
             <div class="field"><label for="book-pages">Pages</label><input id="book-pages" name="pageCount" inputmode="numeric" type="number" min="0" /></div>
             <div class="field"><label for="book-language">Language</label><input id="book-language" name="language" maxlength="30" /></div>
             <div class="field field-wide"><label for="book-categories">Genres / subjects</label><input id="book-categories" name="categories" placeholder="Fantasy, Mystery, History…" /></div>
+            <div class="field field-wide"><label for="book-collections">Collections</label><input id="book-collections" name="collections" list="collection-suggestions" placeholder="Series, box set, or custom shelves…" /><small class="field-help">Separate multiple collections with commas.</small><datalist id="collection-suggestions"></datalist></div>
             <div class="field field-wide"><label for="book-cover">Cover image URL</label><input id="book-cover" name="coverUrl" inputmode="url" /></div>
             <div class="field"><label for="book-status">Reading status</label><select id="book-status" name="readingStatus"><option value="unread">Want to read</option><option value="reading">Reading now</option><option value="read">Finished</option><option value="dnf">Did not finish</option></select></div>
             <div class="field"><label for="book-community-rating">Book rating</label><input id="book-community-rating" name="bookRating" type="number" min="1" max="5" step="0.1" readonly placeholder="Not available" /><small class="field-help" id="book-rating-source"></small><input type="hidden" name="bookRatingsCount" /><input type="hidden" name="bookRatingSource" /></div>
@@ -204,6 +226,31 @@
           <button class="button button-primary" id="save-book" type="submit">Add to shelf</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog class="modal export-modal" id="export-dialog">
+      <div class="modal-header sticky-modal-header">
+        <div><p class="eyebrow">Take it with you</p><h2>Export your bookshelf</h2></div>
+        <button class="close-button" type="button" data-close="export-dialog" aria-label="Close export options">×</button>
+      </div>
+      <p class="modal-intro">Choose a readable catalog, a portable backup, or a complete copy of the app database.</p>
+      <div class="export-options">
+        <a class="export-option" href="/api/export/excel" download>
+          <span class="export-icon" aria-hidden="true">XLSX</span>
+          <span><strong>Excel workbook</strong><small>A formatted, filterable catalog with a library summary and collections.</small></span>
+          <b aria-hidden="true">↓</b>
+        </a>
+        <a class="export-option" href="/api/export" download>
+          <span class="export-icon" aria-hidden="true">JSON</span>
+          <span><strong>Book backup</strong><small>A portable copy of book records only. Saved provider credentials are excluded.</small></span>
+          <b aria-hidden="true">↓</b>
+        </a>
+        <a class="export-option database-export" href="/api/export/database" download>
+          <span class="export-icon" aria-hidden="true">DB</span>
+          <span><strong>Complete SQLite database</strong><small>For a full restore. This includes app settings and any saved API keys or Amazon cookie.</small></span>
+          <b aria-hidden="true">↓</b>
+        </a>
+      </div>
     </dialog>
 
     <dialog class="modal metadata-modal" id="metadata-dialog">
@@ -293,6 +340,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
-    <script type="module" src="/app.js?v=2.3.1"></script>
+    <script type="module" src="/app.js?v=2.4.0"></script>
   </body>
 </html>
