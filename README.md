@@ -12,6 +12,8 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Offers a flashlight control when the selected camera and browser support it
 - Scans a larger live-camera region at a higher frame rate and requests continuous focus when the browser supports it
 - Retries captured photos with full-frame and focused, high-contrast image passes
+- Falls back to locally reading the printed ISBN digits when the barcode bars will not scan
+- Validates OCR results with the ISBN checksum before any metadata lookup
 - Rejects retail/product barcodes and the small five-digit price supplement
 - Looks up multiple editions through Open Library, Google Books, and either optional Amazon connection method
 - Shows every cover returned by the configured providers and lets the user upload a custom cover
@@ -27,7 +29,7 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Lets the owner change the bookshelf name and welcome message in the app
 - Installs to a phone home screen as a PWA
 
-Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, embedded SQLite support, and local cover cache. No separate database container is required. The application makes outbound provider requests only during metadata lookup; the library and chosen covers remain in the mounted appdata directory.
+Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, local printed-ISBN reader, embedded SQLite support, and local cover cache. No separate database container is required. Printed-ISBN photos are processed inside the container and are not saved. The application makes outbound provider requests only during metadata lookup; the library and chosen covers remain in the mounted appdata directory.
 
 ## Unraid quick start with Compose Manager
 
@@ -187,7 +189,7 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.4.0 adds a dedicated book-details experience, persistent collections with shelf filtering and sorting, Excel and live SQLite exports, and faster multi-pass barcode scanning. Existing books, covers, settings, and secrets are migrated and preserved automatically.
+Release 2.5.0 adds automatic printed-ISBN recognition after barcode attempts fail, plus an on-demand printed-number capture in the live scanner. OCR runs locally in the self-contained container, and checksum validation prevents a misread number from triggering the wrong book lookup. Existing books, covers, settings, and secrets are preserved automatically.
 
 ## Local development
 

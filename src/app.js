@@ -7,6 +7,7 @@ import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
 import { checkAmazonCookie, isSupportedAmazonMarketplace, lookupBookMetadata, searchBookMetadata } from "./metadata.js";
 import { cacheBookCover, coverCacheState, fetchProviderCover, saveUploadedCover } from "./covers.js";
 import { createBookshelfWorkbook } from "./excel.js";
+import { recognizeIsbnImage } from "./ocr.js";
 import {
   createBook,
   deleteAppSettings,
@@ -25,7 +26,7 @@ import {
 import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.4.0";
+export const APP_VERSION = "2.5.0";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
@@ -98,6 +99,7 @@ export function createApp({
   searchMetadata = searchBookMetadata,
   testAmazonCookie = checkAmazonCookie,
   loadProviderCover = fetchProviderCover,
+  recognizePrintedIsbn = recognizeIsbnImage,
   trustProxy = false,
   coverDirectory = null,
   databasePath = null,
@@ -145,6 +147,21 @@ export function createApp({
     }),
   );
   app.use(express.json({ limit: "2mb" }));
+
+  app.post("/api/scan/isbn-text", express.raw({ type: "image/*", limit: "10mb" }), async (request, response, next) => {
+    try {
+      if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+        return response.status(400).json({ error: "Send a JPEG, PNG, or WebP photo of the printed ISBN." });
+      }
+      const isbn = cleanIsbn(await recognizePrintedIsbn(request.body));
+      if (!isValidIsbn10(isbn) && !isValidIsbn13(isbn)) {
+        return response.status(422).json({ error: "No valid printed ISBN was found in that photo." });
+      }
+      return response.json({ isbn, method: "printed-isbn" });
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   app.get("/api/health", async (_request, response, next) => {
     try {

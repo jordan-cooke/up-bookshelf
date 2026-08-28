@@ -1,6 +1,6 @@
 {
   "name": "up-bookshelf",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": true,
   "type": "module",
   "description": "A private, self-hosted bookshelf with ISBN camera scanning.",
@@ -13,10 +13,12 @@
     "node": ">=22.16"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
     "cheerio": "1.1.2",
     "exceljs": "4.4.0",
     "express": "5.2.1",
     "helmet": "8.3.0",
-    "html5-qrcode": "2.3.8"
+    "html5-qrcode": "2.3.8",
+    "tesseract.js": "7.0.0"
   }
 }

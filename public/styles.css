@@ -256,6 +256,7 @@ dialog::backdrop { background: rgb(25 34 30 / 60%); backdrop-filter: blur(3px); 
 .camera-settings p { margin: 0; grid-column: 1 / -1; color: var(--muted); font-size: .78rem; line-height: 1.45; }
 .torch-button { min-height: 42px; padding: .5rem .75rem; }
 .torch-button.is-on { color: #17231e; border-color: var(--gold); background: var(--gold); }
+.isbn-text-button { min-height: 42px; grid-column: 1 / -1; }
 #scanner-reader { padding: .7rem !important; }
 #scanner-reader video { border-radius: 10px; object-fit: cover; }
 #scanner-reader img { max-width: 64px; }

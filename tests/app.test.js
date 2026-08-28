@@ -37,11 +37,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.4.0",
+      version: "2.5.0",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.4.0");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.5.0");
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -61,11 +61,12 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.4\.0/);
+    assert.match(html, /styles\.css\?v=2\.5\.0/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
     assert.match(html, /id="torch-button"/);
+    assert.match(html, /id="read-isbn-text-button"/);
     assert.match(html, /id="metadata-dialog"/);
     assert.match(html, /id="cover-options-button"/);
     assert.match(html, /id="custom-cover-file"/);
@@ -85,7 +86,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(html, />Book rating</);
     assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.4.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.5.0`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     const css = await stylesheet.text();
@@ -95,11 +96,12 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(css, /\.details-hero/);
     assert.match(css, /\.export-options/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.4.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.5.0`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     const javascript = await script.text();
     assert.match(javascript, /scanBarcodePhoto/);
+    assert.match(javascript, /\/api\/scan\/isbn-text/);
     assert.match(javascript, /resumeContinuousScanning/);
     assert.match(javascript, /displayCoverUrl/);
     assert.match(javascript, /openBookDetails/);
@@ -370,6 +372,36 @@ test("invalid ISBN lookups are rejected before provider access", async () => {
       assert.equal(response.status, 400);
       assert.match((await response.json()).error, /valid ISBN/);
     }
+  });
+});
+
+test("reads a checksum-validated printed ISBN from a photo", async () => {
+  const image = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
+  await withServer({
+    recognizePrintedIsbn: async (received) => {
+      assert.deepEqual(received, image);
+      return "9781649379825";
+    },
+  }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/scan/isbn-text`, {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg" },
+      body: image,
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { isbn: "9781649379825", method: "printed-isbn" });
+  });
+});
+
+test("printed ISBN scanning rejects an unreadable or checksum-invalid result", async () => {
+  await withServer({ recognizePrintedIsbn: async () => "9780306406158" }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/scan/isbn-text`, {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg" },
+      body: Buffer.from([1, 2, 3]),
+    });
+    assert.equal(response.status, 422);
+    assert.match((await response.json()).error, /No valid printed ISBN/);
   });
 });
 

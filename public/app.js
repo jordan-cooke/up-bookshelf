@@ -27,6 +27,7 @@ const elements = {
   cameraSelect: document.querySelector("#camera-select"),
   torchButton: document.querySelector("#torch-button"),
   torchLabel: document.querySelector("#torch-label"),
+  readIsbnTextButton: document.querySelector("#read-isbn-text-button"),
   photoScanButton: document.querySelector("#photo-scan-button"),
   barcodePhoto: document.querySelector("#barcode-photo"),
   liveScanButton: document.querySelector("#live-scan-button"),
@@ -549,6 +550,37 @@ async function toggleTorch() {
   }
 }
 
+async function readPrintedIsbn(file) {
+  const response = await fetch("/api/scan/isbn-text", {
+    method: "POST",
+    headers: { "Content-Type": file.type || "image/jpeg" },
+    body: file,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 422) return null;
+  if (!response.ok) throw new Error(result.error || "The printed ISBN could not be read.");
+  return result.isbn || null;
+}
+
+async function capturePrintedIsbn() {
+  const video = elements.scannerReader.querySelector("video");
+  if (!video?.videoWidth || !video?.videoHeight) {
+    toast("Wait for the camera to focus, then try reading the printed ISBN again.", "info");
+    return;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
+  if (!blob) {
+    toast("The browser could not capture that frame. Try taking a photo instead.", "error");
+    return;
+  }
+  await disposeScanner();
+  await scanBarcodePhoto(new File([blob], "printed-isbn.jpg", { type: "image/jpeg" }));
+}
+
 async function enhancedPhotos(file) {
   const bitmap = await createImageBitmap(file);
   const makeVariant = async (source, name) => {
@@ -632,7 +664,15 @@ async function scanBarcodePhoto(file) {
         // Retry once with the high-contrast, upscaled image.
       }
     }
-    if (!decodedText) throw new Error("No ISBN barcode was detected");
+    if (!decodedText) {
+      elements.lookupProgressLabel.textContent = "Barcode not found—reading the printed ISBN number…";
+      const ocrVariants = [...new Set([variants.at(-1), variants[1], file].filter(Boolean))].slice(0, 2);
+      for (const variant of ocrVariants) {
+        decodedText = await readPrintedIsbn(variant);
+        if (decodedText) break;
+      }
+    }
+    if (!decodedText) throw new Error("No valid barcode or printed ISBN was detected");
     elements.lookupProgress.hidden = true;
     const accepted = await lookupIsbn(decodedText, "photo");
     if (!accepted && elements.scannerDialog.open) {
@@ -644,7 +684,7 @@ async function scanBarcodePhoto(file) {
     elements.scanActions.hidden = false;
     elements.scannerShell.hidden = true;
     elements.lookupProgress.hidden = true;
-    toast("We couldn’t read the ISBN. Fill the frame with the long 978/979 barcode, keep the small price barcode outside the guide, and try good even light.", "error");
+    toast("We couldn’t read the ISBN. Include the long 978/979 barcode and its printed number, keep the small price barcode outside the guide, and use clear even light.", "error");
   }
 }
 
@@ -1169,6 +1209,7 @@ elements.barcodePhoto.addEventListener("change", () => scanBarcodePhoto(elements
 elements.liveScanButton.addEventListener("click", startLiveScanner);
 elements.cameraSelect.addEventListener("change", () => startSelectedCamera(elements.cameraSelect.value));
 elements.torchButton.addEventListener("click", toggleTorch);
+elements.readIsbnTextButton.addEventListener("click", capturePrintedIsbn);
 elements.bookForm.addEventListener("submit", saveBook);
 elements.deleteBook.addEventListener("click", removeBook);
 elements.compareMetadata.addEventListener("click", openMetadataComparison);
