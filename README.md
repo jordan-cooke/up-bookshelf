@@ -13,6 +13,7 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Scans a larger live-camera region at a higher frame rate and requests continuous focus when the browser supports it
 - Retries captured photos with full-frame and focused, high-contrast image passes
 - Falls back to locally reading the printed ISBN digits when the barcode bars will not scan
+- Accepts iPhone HEIC/HEIF photos directly and normalizes them inside the container
 - Validates OCR results with the ISBN checksum before any metadata lookup
 - Rejects retail/product barcodes and the small five-digit price supplement
 - Looks up multiple editions through Open Library, Google Books, and either optional Amazon connection method
@@ -189,7 +190,7 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.5.0 adds automatic printed-ISBN recognition after barcode attempts fail, plus an on-demand printed-number capture in the live scanner. OCR runs locally in the self-contained container, and checksum validation prevents a misread number from triggering the wrong book lookup. Existing books, covers, settings, and secrets are preserved automatically.
+Release 2.5.1 tunes scanning against a six-photo real-world barcode set, prioritizes the original and neutral high-resolution image before high-contrast fallbacks, and adds direct HEIC/HEIF conversion for iPhone photos. All six supplied labels are recognized in browser and server-side tests, including an older ISBN-10 edition. Existing books, covers, settings, and secrets are preserved automatically.
 
 ## Local development
 

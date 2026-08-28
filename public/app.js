@@ -551,9 +551,10 @@ async function toggleTorch() {
 }
 
 async function readPrintedIsbn(file) {
+  const contentType = file.type || (/\.(?:heic|heif)$/i.test(file.name || "") ? "image/heic" : "image/jpeg");
   const response = await fetch("/api/scan/isbn-text", {
     method: "POST",
-    headers: { "Content-Type": file.type || "image/jpeg" },
+    headers: { "Content-Type": contentType },
     body: file,
   });
   const result = await response.json().catch(() => ({}));
@@ -581,30 +582,68 @@ async function capturePrintedIsbn() {
   await scanBarcodePhoto(new File([blob], "printed-isbn.jpg", { type: "image/jpeg" }));
 }
 
-async function enhancedPhotos(file) {
-  const bitmap = await createImageBitmap(file);
+async function loadPhotoSource(file) {
+  if (window.createImageBitmap) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return { image: bitmap, width: bitmap.width, height: bitmap.height, release: () => bitmap.close() };
+    } catch {
+      // Safari can display some iPhone formats that createImageBitmap cannot decode.
+    }
+  }
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("This photo format could not be opened by the browser."));
+      image.src = objectUrl;
+    });
+    return { image, width: image.naturalWidth, height: image.naturalHeight, release: () => URL.revokeObjectURL(objectUrl) };
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+async function enhancedPhotos(file, { contrast = false } = {}) {
+  const sourceImage = await loadPhotoSource(file);
   const makeVariant = async (source, name) => {
-    const scale = Math.min(2.8, Math.max(0.3, 2200 / source.width));
+    const targetWidth = contrast ? 2200 : 2600;
+    const scale = Math.min(2.8, Math.max(0.3, targetWidth / source.width));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(source.width * scale);
     canvas.height = Math.round(source.height * scale);
     const context = canvas.getContext("2d", { willReadFrequently: true });
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
-    context.filter = "grayscale(1) contrast(1.75)";
-    context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.94));
+    if (contrast) context.filter = "grayscale(1) contrast(1.75)";
+    context.drawImage(sourceImage.image, source.x, source.y, source.width, source.height, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", contrast ? 0.94 : 0.96));
+    canvas.width = 1;
+    canvas.height = 1;
     return blob ? new File([blob], name, { type: "image/jpeg" }) : null;
   };
-  const full = await makeVariant({ x: 0, y: 0, width: bitmap.width, height: bitmap.height }, "enhanced-isbn.jpg");
-  const focused = await makeVariant({
-    x: Math.round(bitmap.width * 0.04),
-    y: Math.round(bitmap.height * 0.2),
-    width: Math.round(bitmap.width * 0.92),
-    height: Math.round(bitmap.height * 0.72),
-  }, "focused-isbn.jpg");
-  bitmap.close();
-  return [full, focused].filter(Boolean);
+  const full = { x: 0, y: 0, width: sourceImage.width, height: sourceImage.height };
+  const focused = {
+    x: Math.round(sourceImage.width * 0.02),
+    y: Math.round(sourceImage.height * 0.15),
+    width: Math.round(sourceImage.width * 0.96),
+    height: Math.round(sourceImage.height * 0.82),
+  };
+  try {
+    const variants = [];
+    for (const [source, name] of [
+      [full, contrast ? "enhanced-isbn.jpg" : "neutral-isbn.jpg"],
+      [focused, contrast ? "enhanced-focused-isbn.jpg" : "neutral-focused-isbn.jpg"],
+    ]) {
+      const variant = await makeVariant(source, name);
+      if (variant) variants.push(variant);
+    }
+    return variants;
+  } finally {
+    sourceImage.release();
+  }
 }
 
 async function detectWithBrowser(file) {
@@ -648,28 +687,42 @@ async function scanBarcodePhoto(file) {
   elements.lookupProgress.hidden = false;
   elements.lookupProgressLabel.textContent = "Reading the ISBN barcode…";
   try {
-    let decodedText = null;
-    decodedText = await detectWithBrowser(file);
-    const variants = [file];
-    if (!decodedText && window.createImageBitmap) {
-      variants.push(...await enhancedPhotos(file).catch(() => []));
-    }
-    for (const [index, variant] of variants.entries()) {
-      if (!decodedText && index > 0) decodedText = await detectWithBrowser(variant);
-      if (decodedText) break;
+    let decodedText = await detectWithBrowser(file);
+    if (!decodedText) {
       try {
-        decodedText = await scanFileWithLibrary(variant);
-        if (decodedText) break;
+        decodedText = await scanFileWithLibrary(file);
       } catch {
-        // Retry once with the high-contrast, upscaled image.
+        // Normalize the photo only if the original cannot be decoded as-is.
       }
     }
     if (!decodedText) {
       elements.lookupProgressLabel.textContent = "Barcode not found—reading the printed ISBN number…";
-      const ocrVariants = [...new Set([variants.at(-1), variants[1], file].filter(Boolean))].slice(0, 2);
-      for (const variant of ocrVariants) {
-        decodedText = await readPrintedIsbn(variant);
+      const originalCanUseServerOcr = /^image\/(?:jpeg|png|webp|heic|heif)$/i.test(file.type || "")
+        || /\.(?:heic|heif)$/i.test(file.name || "");
+      if (originalCanUseServerOcr) decodedText = await readPrintedIsbn(file);
+      const prepared = !decodedText ? await enhancedPhotos(file).catch(() => []) : [];
+      for (const variant of prepared) {
+        if (!decodedText) decodedText = await detectWithBrowser(variant);
+        if (!decodedText) decodedText = await readPrintedIsbn(variant);
         if (decodedText) break;
+      }
+      for (const variant of prepared) {
+        if (decodedText) break;
+        try {
+          decodedText = await scanFileWithLibrary(variant);
+        } catch {
+          // Try the other neutral crop before applying heavier contrast.
+        }
+      }
+      const contrastVariants = !decodedText ? await enhancedPhotos(file, { contrast: true }).catch(() => []) : [];
+      for (const variant of contrastVariants) {
+        if (!decodedText) decodedText = await detectWithBrowser(variant);
+        if (decodedText) break;
+        try {
+          decodedText = await scanFileWithLibrary(variant);
+        } catch {
+          // All barcode and printed-number paths have now been tried.
+        }
       }
     }
     if (!decodedText) throw new Error("No valid barcode or printed ISBN was detected");

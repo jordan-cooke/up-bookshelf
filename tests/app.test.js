@@ -37,11 +37,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.5.0",
+      version: "2.5.1",
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.5.0");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.5.1");
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -61,7 +61,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.5\.0/);
+    assert.match(html, /styles\.css\?v=2\.5\.1/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
@@ -86,7 +86,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(html, />Book rating</);
     assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.5.0`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.5.1`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     const css = await stylesheet.text();
@@ -96,7 +96,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(css, /\.details-hero/);
     assert.match(css, /\.export-options/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.5.0`);
+    const script = await fetch(`${baseUrl}/app.js?v=2.5.1`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     const javascript = await script.text();
@@ -106,6 +106,10 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(javascript, /displayCoverUrl/);
     assert.match(javascript, /openBookDetails/);
     assert.match(javascript, /loadCollections/);
+    assert.match(javascript, /neutral-isbn\.jpg/);
+    assert.match(javascript, /loadPhotoSource/);
+    assert.match(javascript, /heic\|heif/);
+    assert.ok(javascript.indexOf("scanFileWithLibrary(file)") < javascript.indexOf("enhancedPhotos(file)"));
 
     const icon = await fetch(`${baseUrl}/icon.svg`);
     assert.equal(icon.status, 200);
@@ -378,8 +382,9 @@ test("invalid ISBN lookups are rejected before provider access", async () => {
 test("reads a checksum-validated printed ISBN from a photo", async () => {
   const image = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
   await withServer({
-    recognizePrintedIsbn: async (received) => {
+    recognizePrintedIsbn: async (received, options) => {
       assert.deepEqual(received, image);
+      assert.deepEqual(options, { contentType: "image/jpeg" });
       return "9781649379825";
     },
   }, async (baseUrl) => {

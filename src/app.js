@@ -26,7 +26,7 @@ import {
 import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.5.0";
+export const APP_VERSION = "2.5.1";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
 const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
 
@@ -151,9 +151,10 @@ export function createApp({
   app.post("/api/scan/isbn-text", express.raw({ type: "image/*", limit: "10mb" }), async (request, response, next) => {
     try {
       if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
-        return response.status(400).json({ error: "Send a JPEG, PNG, or WebP photo of the printed ISBN." });
+        return response.status(400).json({ error: "Send a JPEG, PNG, WebP, HEIC, or HEIF photo of the printed ISBN." });
       }
-      const isbn = cleanIsbn(await recognizePrintedIsbn(request.body));
+      const contentType = request.get("content-type")?.split(";", 1)[0] || "";
+      const isbn = cleanIsbn(await recognizePrintedIsbn(request.body, { contentType }));
       if (!isValidIsbn10(isbn) && !isValidIsbn13(isbn)) {
         return response.status(422).json({ error: "No valid printed ISBN was found in that photo." });
       }

@@ -1,5 +1,6 @@
 import tesseract from "tesseract.js";
 import englishLanguageData from "@tesseract.js-data/eng";
+import heicConvert from "heic-convert";
 import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
 
 const { createWorker, OEM, PSM } = tesseract;
@@ -19,6 +20,23 @@ const OCR_CHARACTER_FIXES = new Map([
 
 let workerPromise = null;
 let recognitionQueue = Promise.resolve();
+const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"]);
+
+export function isHeifImage(image, contentType = "") {
+  if (/^image\/hei[cf](?:-sequence)?$/i.test(String(contentType).split(";", 1)[0].trim())) return true;
+  if (!image || image.byteLength < 12) return false;
+  const header = Buffer.from(image.buffer || image, image.byteOffset || 0, Math.min(image.byteLength, 64));
+  if (header.toString("ascii", 4, 8) !== "ftyp") return false;
+  for (let offset = 8; offset + 4 <= header.length; offset += 4) {
+    if (HEIF_BRANDS.has(header.toString("ascii", offset, offset + 4))) return true;
+  }
+  return false;
+}
+
+async function normalizeOcrImage(image, contentType) {
+  if (!isHeifImage(image, contentType)) return image;
+  return Buffer.from(await heicConvert({ buffer: Buffer.from(image), format: "JPEG", quality: 0.95 }));
+}
 
 function correctOcrCharacters(value) {
   return [...String(value || "").toUpperCase()]
@@ -80,10 +98,11 @@ async function getWorker() {
   return workerPromise;
 }
 
-export function recognizeIsbnImage(image) {
+export function recognizeIsbnImage(image, { contentType = "" } = {}) {
   const recognize = async () => {
+    const normalizedImage = await normalizeOcrImage(image, contentType);
     const worker = await getWorker();
-    const result = await worker.recognize(image);
+    const result = await worker.recognize(normalizedImage);
     return extractIsbnFromText(result?.data?.text || "");
   };
   const job = recognitionQueue.then(recognize, recognize);

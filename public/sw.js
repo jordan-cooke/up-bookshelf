@@ -1,5 +1,5 @@
-const CACHE = "up-bookshelf-v15";
-const SHELL = ["/", "/styles.css?v=2.5.0", "/app.js?v=2.5.0", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
+const CACHE = "up-bookshelf-v16";
+const SHELL = ["/", "/styles.css?v=2.5.1", "/app.js?v=2.5.1", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
