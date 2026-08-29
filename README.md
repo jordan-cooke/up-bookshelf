@@ -2,6 +2,9 @@
 
 **UP (Ur Private) Bookshelf** is a private, self-hosted home library designed for a phone. Scan an ISBN barcode, compare metadata and cover choices, and add the edition to a searchable digital shelf.
 
+> [!IMPORTANT]
+> **AI-assisted development notice:** UP Bookshelf is a personal, AI-assisted (or “vibe-coded”) open-source project. It has automated tests and is actively used by its creator, but it has not received an independent security audit. Review the code, keep backups of your library data, and use it at your own risk. It is intended for a trusted local network or private tailnet and should not be exposed directly to the public internet.
+
 Every new installation starts as **UP Bookshelf** with the motto “Every good story, right where you left it.” The owner can rename it, edit or hide the motto, and configure optional providers from the in-app settings page—no Docker edits or rebuild are required.
 
 ## What it does
@@ -38,7 +41,7 @@ Everything needed to run the application is in one Docker image: the Node server
 
    ```bash
    cd /mnt/user/appdata
-   git clone YOUR_REPOSITORY_URL up-bookshelf
+   git clone https://github.com/jordan-cooke/up-bookshelf.git up-bookshelf
    cd up-bookshelf
    cp .env.example .env
    mkdir -p /mnt/user/appdata/up-bookshelf/data
@@ -202,6 +205,10 @@ cp .env.example .env
 pnpm start
 pnpm test
 ```
+
+## License
+
+UP (Ur Private) Bookshelf is released under the [MIT License](LICENSE). The software is provided as-is, without warranty. See [SECURITY.md](SECURITY.md) for the supported deployment model and vulnerability-reporting guidance.
 
 ## Project layout
 

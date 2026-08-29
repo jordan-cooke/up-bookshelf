@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "A private, self-hosted bookshelf with ISBN camera scanning.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jordan-cooke/up-bookshelf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jordan-cooke/up-bookshelf/issues"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
