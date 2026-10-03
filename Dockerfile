@@ -8,7 +8,8 @@ FROM node:22-alpine
 LABEL org.opencontainers.image.source="https://github.com/jordan-cooke/up-bookshelf" \
       org.opencontainers.image.title="UP (Ur Private) Bookshelf" \
       org.opencontainers.image.licenses="MIT"
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    DB_PATH=/data/bookshelf.sqlite
 WORKDIR /app
 RUN apk add --no-cache su-exec \
   && addgroup -S bookshelf \

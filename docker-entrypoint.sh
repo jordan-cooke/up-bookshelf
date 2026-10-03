@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-for asset in index.html styles.css app.js icon.svg manifest.webmanifest; do
+for asset in index.html styles.css app.js isbn.js icon.svg manifest.webmanifest; do
   if [ ! -s "/app/public/$asset" ]; then
     echo "Required app asset is missing: /app/public/$asset" >&2
     exit 1
