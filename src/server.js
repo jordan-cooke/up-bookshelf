@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "./app.js";
 import { initializeDatabase } from "./repository.js";
+import { terminateIsbnOcr } from "./ocr.js";
 
 const config = {
   port: Number(process.env.PORT || 3000),
@@ -30,6 +31,7 @@ const server = app.listen(config.port, "0.0.0.0", () => {
 
 function shutDown(signal) {
   console.log(`${signal} received; closing the bookshelf.`);
+  terminateIsbnOcr().catch(() => {});
   server.close(() => {
     database.close();
     process.exit(0);

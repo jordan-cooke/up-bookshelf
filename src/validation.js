@@ -33,6 +33,7 @@ export function validateCoverUrl(value) {
 }
 
 export function validateBook(input = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ValidationError("Send a book object.");
   const title = cleanText(input.title, 500);
   if (!title) throw new ValidationError("Title is required.");
 
@@ -41,6 +42,7 @@ export function validateBook(input = {}) {
   if (isbn10 && !isValidIsbn10(isbn10)) throw new ValidationError("ISBN-10 is not valid.");
   if (isbn13 && !isValidIsbn13(isbn13)) throw new ValidationError("ISBN-13 is not valid.");
   if (!isbn13 && isbn10) isbn13 = toIsbn13(isbn10);
+  if (isbn10 && isbn13 && toIsbn13(isbn10) !== isbn13) throw new ValidationError("ISBN-10 and ISBN-13 must identify the same edition.");
 
   const ratingValue = input.rating === "" || input.rating == null ? null : Number(input.rating);
   if (ratingValue != null && (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5)) {

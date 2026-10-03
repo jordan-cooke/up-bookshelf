@@ -1,5 +1,8 @@
+import { cleanIsbn, isValidIsbn10, isValidIsbn13 } from "./isbn.js";
+
 const elements = {
   grid: document.querySelector("#book-grid"),
+  loadMore: document.querySelector("#load-more-books"),
   empty: document.querySelector("#empty-state"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search"),
@@ -77,7 +80,16 @@ const METADATA_FIELDS = [
 ];
 
 let scanner = null;
+let scannerSession = 0;
+let photoController = null;
+let highResolutionTimer = null;
+let cameraStarting = false;
+let capturingFrame = false;
+let photoDecoderQueue = Promise.resolve();
 let searchTimer = null;
+let booksController = null;
+let visibleBooks = 0;
+let lastContinuousIsbn = "";
 let scanLocked = false;
 let torchEnabled = false;
 let activeProviders = [];
@@ -309,20 +321,35 @@ function skeletons() {
   `).join("");
 }
 
-async function loadBooks() {
+async function loadBooks({ append = false } = {}) {
+  booksController?.abort();
+  const controller = new AbortController();
+  booksController = controller;
+  elements.loadMore.disabled = true;
   elements.grid.setAttribute("aria-busy", "true");
-  skeletons();
+  if (!append) {
+    visibleBooks = 0;
+    elements.loadMore.hidden = true;
+    elements.grid.hidden = false;
+    elements.empty.hidden = true;
+    skeletons();
+  }
   const [sort, order] = elements.sort.value.split(":");
-  const parameters = new URLSearchParams({ sort, order });
+  const parameters = new URLSearchParams({ sort, order, limit: "100", offset: String(visibleBooks) });
   if (elements.search.value.trim()) parameters.set("q", elements.search.value.trim());
   if (elements.status.value) parameters.set("status", elements.status.value);
   if (elements.collection.value) parameters.set("collection", elements.collection.value);
 
   try {
-    const data = await api(`/api/books?${parameters}`);
-    elements.grid.innerHTML = data.books.map(bookCard).join("");
-    elements.grid.hidden = data.books.length === 0;
-    elements.empty.hidden = data.books.length !== 0;
+    const data = await api(`/api/books?${parameters}`, { signal: controller.signal });
+    if (booksController !== controller) return;
+    const cards = data.books.map(bookCard).join("");
+    if (append) elements.grid.insertAdjacentHTML("beforeend", cards);
+    else elements.grid.innerHTML = cards;
+    visibleBooks += data.books.length;
+    elements.grid.hidden = visibleBooks === 0;
+    elements.empty.hidden = visibleBooks !== 0;
+    elements.loadMore.hidden = visibleBooks >= data.total;
     const filtered = elements.search.value.trim() || elements.status.value || elements.collection.value;
     elements.empty.querySelector("h3").textContent = filtered ? "No books found" : "Your shelves are waiting";
     elements.empty.querySelector("p").textContent = filtered
@@ -330,10 +357,17 @@ async function loadBooks() {
       : "Scan the barcode on your first book and we’ll find the title, author, and cover.";
     elements.count.textContent = `${data.total} ${data.total === 1 ? "book" : "books"}`;
   } catch (error) {
+    if (controller.signal.aborted || booksController !== controller) return;
+    if (append) {
+      toast(error.message, "error");
+      return;
+    }
     elements.grid.innerHTML = `<div class="load-error"><strong>We couldn’t reach the bookshelf.</strong><p>${escapeHtml(error.message)}</p><button class="button button-secondary" type="button" data-action="reload">Try again</button></div>`;
     elements.count.textContent = "Unable to load";
   } finally {
+    if (booksController !== controller) return;
     elements.grid.setAttribute("aria-busy", "false");
+    elements.loadMore.disabled = false;
   }
 }
 
@@ -418,6 +452,7 @@ async function loadStats() {
 }
 
 async function disposeScanner() {
+  clearTimeout(highResolutionTimer);
   const current = scanner;
   scanner = null;
   torchEnabled = false;
@@ -425,12 +460,19 @@ async function disposeScanner() {
   elements.torchButton.setAttribute("aria-pressed", "false");
   elements.torchButton.classList.remove("is-on");
   elements.torchLabel.textContent = "Flashlight";
+  await stopScannerInstance(current);
+}
+
+async function stopScannerInstance(current) {
   if (!current) return;
   try { await current.stop(); } catch { /* It may be a photo scanner or already stopped. */ }
   try { current.clear(); } catch { /* The target can already have been cleared. */ }
 }
 
 async function closeScanner() {
+  scannerSession++;
+  photoController?.abort();
+  photoController = null;
   scanLocked = false;
   scannerInputMode = "";
   if (elements.scannerDialog.open) elements.scannerDialog.close();
@@ -438,7 +480,9 @@ async function closeScanner() {
   elements.scannerReader.replaceChildren();
 }
 
-function openScanner() {
+function openScanner(continuing = false) {
+  scannerSession++;
+  if (!continuing) lastContinuousIsbn = "";
   elements.isbnInput.value = "";
   elements.barcodePhoto.value = "";
   elements.scanActions.hidden = false;
@@ -451,9 +495,12 @@ function openScanner() {
 }
 
 function resumeContinuousScanning(mode) {
-  openScanner();
+  openScanner(true);
   toast("Book added. Ready for the next one.", "info");
-  if (mode === "live" && window.isSecureContext) setTimeout(() => startLiveScanner(), 120);
+  const session = scannerSession;
+  if (mode === "live" && window.isSecureContext) setTimeout(() => {
+    if (session === scannerSession && elements.scannerDialog.open) startLiveScanner();
+  }, 120);
 }
 
 function cameraScore(camera) {
@@ -477,36 +524,64 @@ function scanBox(viewWidth, viewHeight) {
 }
 
 async function startSelectedCamera(cameraId) {
+  if (cameraStarting || photoController || capturingFrame) return;
+  cameraStarting = true;
+  const session = ++scannerSession;
+  elements.cameraSelect.disabled = true;
   await disposeScanner();
+  if (session !== scannerSession || !elements.scannerDialog.open) {
+    cameraStarting = false;
+    elements.cameraSelect.disabled = false;
+    return;
+  }
   elements.scannerReader.replaceChildren();
-  scanner = new Html5Qrcode("scanner-reader", {
+  const current = new Html5Qrcode("scanner-reader", {
     formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
     useBarCodeDetectorIfSupported: true,
   });
+  scanner = current;
   try {
-    await scanner.start(
+    await current.start(
       cameraId,
-      { fps: 24, qrbox: scanBox, aspectRatio: 1.777, disableFlip: true },
-      (decodedText) => lookupIsbn(decodedText, "live"),
+      {
+        fps: 12, qrbox: scanBox, disableFlip: true,
+        videoConstraints: { deviceId: { exact: cameraId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      },
+      (decodedText) => {
+        if (session === scannerSession && !photoController && !capturingFrame && isValidIsbn13(decodedText)) lookupIsbn(decodedText, "live");
+      },
       () => {},
     );
+    if (session !== scannerSession || !elements.scannerDialog.open) {
+      await stopScannerInstance(current);
+      if (scanner === current) scanner = null;
+      return;
+    }
     localStorage.setItem("up-bookshelf-camera", cameraId);
     scannerInputMode = "live";
     let capabilities = {};
-    try { capabilities = scanner.getRunningTrackCapabilities() || {}; } catch { /* Browser does not expose capabilities. */ }
+    try { capabilities = current.getRunningTrackCapabilities() || {}; } catch { /* Browser does not expose capabilities. */ }
     elements.torchButton.hidden = !capabilities.torch;
     if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
-      try { await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch { /* The selected browser may reject optional focus controls. */ }
+      try { await current.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch { /* The selected browser may reject optional focus controls. */ }
     }
+    scheduleHighResolutionScan(session);
   } catch (error) {
-    await disposeScanner();
+    await stopScannerInstance(current);
+    if (scanner === current) scanner = null;
+    if (session !== scannerSession) return;
     elements.scanActions.hidden = false;
     elements.scannerShell.hidden = true;
     toast(error?.message || "That camera could not be started. Try another camera or take a photo.", "error");
+  } finally {
+    cameraStarting = false;
+    elements.cameraSelect.disabled = false;
   }
 }
 
 async function startLiveScanner() {
+  if (cameraStarting || photoController || !elements.scannerDialog.open) return;
+  const session = scannerSession;
   if (!window.Html5Qrcode) {
     toast("The scanner could not load. Enter the ISBN manually.", "error");
     return;
@@ -517,6 +592,7 @@ async function startLiveScanner() {
   elements.cameraSettings.hidden = false;
   try {
     const cameras = await Html5Qrcode.getCameras();
+    if (session !== scannerSession || !elements.scannerDialog.open) return;
     if (!cameras.length) throw new Error("No camera was found on this device.");
     const recommended = chooseRecommendedCamera(cameras);
     const remembered = localStorage.getItem("up-bookshelf-camera");
@@ -550,36 +626,51 @@ async function toggleTorch() {
   }
 }
 
-async function readPrintedIsbn(file) {
+async function readPrintedIsbn(file, signal) {
   const contentType = file.type || (/\.(?:heic|heif)$/i.test(file.name || "") ? "image/heic" : "image/jpeg");
   const response = await fetch("/api/scan/isbn-text", {
     method: "POST",
     headers: { "Content-Type": contentType },
     body: file,
+    signal,
   });
   const result = await response.json().catch(() => ({}));
   if (response.status === 422) return null;
-  if (!response.ok) throw new Error(result.error || "The printed ISBN could not be read.");
+  if (!response.ok) {
+    const error = new Error(result.error || "The printed ISBN could not be read.");
+    error.status = response.status;
+    throw error;
+  }
   return result.isbn || null;
 }
 
 async function capturePrintedIsbn() {
+  if (capturingFrame || photoController || scanLocked || cameraStarting) return;
   const video = elements.scannerReader.querySelector("video");
   if (!video?.videoWidth || !video?.videoHeight) {
     toast("Wait for the camera to focus, then try reading the printed ISBN again.", "info");
     return;
   }
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
-  if (!blob) {
-    toast("The browser could not capture that frame. Try taking a photo instead.", "error");
-    return;
-  }
-  await disposeScanner();
-  await scanBarcodePhoto(new File([blob], "printed-isbn.jpg", { type: "image/jpeg" }));
+  capturingFrame = true;
+  const session = scannerSession;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
+    canvas.width = canvas.height = 1;
+    if (session !== scannerSession) return;
+    if (!blob) {
+      toast("The browser could not capture that frame. Try taking a photo instead.", "error");
+      return;
+    }
+    await disposeScanner();
+    if (session !== scannerSession) return;
+    await scanBarcodePhoto(new File([blob], "printed-isbn.jpg", { type: "image/jpeg" }), "live");
+  } catch {
+    if (session === scannerSession) toast("Could not capture the ISBN. Try taking a photo.", "error");
+  } finally { capturingFrame = false; }
 }
 
 async function loadPhotoSource(file) {
@@ -610,7 +701,7 @@ async function enhancedPhotos(file, { contrast = false } = {}) {
   const sourceImage = await loadPhotoSource(file);
   const makeVariant = async (source, name) => {
     const targetWidth = contrast ? 2200 : 2600;
-    const scale = Math.min(2.8, Math.max(0.3, targetWidth / source.width));
+    const scale = Math.min(2, targetWidth / source.width, 3600 / source.height);
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(source.width * scale);
     canvas.height = Math.round(source.height * scale);
@@ -648,38 +739,102 @@ async function enhancedPhotos(file, { contrast = false } = {}) {
 
 async function detectWithBrowser(file) {
   if (!window.BarcodeDetector || !window.createImageBitmap) return null;
+  let bitmap;
   try {
     const supported = await BarcodeDetector.getSupportedFormats();
     if (!supported.includes("ean_13")) return null;
     const detector = new BarcodeDetector({ formats: ["ean_13"] });
-    const bitmap = await createImageBitmap(file);
+    bitmap = await createImageBitmap(file);
     const results = await detector.detect(bitmap);
-    bitmap.close();
-    return results.find((result) => /^(978|979)\d{10}$/.test(result.rawValue))?.rawValue || null;
+    return results.find((result) => isValidIsbn13(result.rawValue))?.rawValue || null;
   } catch {
     return null;
-  }
+  } finally { bitmap?.close(); }
 }
 
 async function scanFileWithLibrary(file) {
-  scanner = new Html5Qrcode("scanner-reader", {
-    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
-    useBarCodeDetectorIfSupported: true,
-  });
-  try {
-    return await scanner.scanFile(file, true);
-  } finally {
-    try { scanner.clear(); } catch { /* The failed scan may already be clear. */ }
-    scanner = null;
-  }
+  if (!window.Html5Qrcode) return null;
+  const decode = async () => {
+    const target = document.createElement("div");
+    target.id = "photo-decoder";
+    target.hidden = true;
+    document.body.append(target);
+    let reader;
+    try {
+      reader = new Html5Qrcode(target.id, {
+        formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
+        useBarCodeDetectorIfSupported: true,
+      });
+      const result = await reader.scanFile(file, false);
+      return isValidIsbn13(result) ? result : null;
+    } finally {
+      try { reader?.clear(); } catch { /* A failed scan may already be clear. */ }
+      target.remove();
+    }
+  };
+  const job = photoDecoderQueue.then(decode, decode);
+  photoDecoderQueue = job.catch(() => null);
+  return job;
 }
 
-async function scanBarcodePhoto(file) {
-  if (!file) return;
-  if (!window.Html5Qrcode) {
-    toast("The barcode reader could not load. Enter the ISBN manually.", "error");
+// The library's live canvas is only as wide as its CSS guide on a phone.
+// Periodically decode a native-resolution crop as well, without a second camera.
+function scheduleHighResolutionScan(session) {
+  highResolutionTimer = setTimeout(async () => {
+    if (session !== scannerSession || !scanner || !elements.scannerDialog.open) return;
+    try {
+      const video = elements.scannerReader.querySelector("video");
+      if (!scanLocked && !photoController && !capturingFrame && !document.hidden && video?.videoWidth && video.clientWidth) {
+        const box = scanBox(video.clientWidth, video.clientHeight);
+        const width = video.videoWidth * box.width / video.clientWidth;
+        const height = video.videoHeight * box.height / video.clientHeight;
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 1600 / width);
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        canvas.getContext("2d").drawImage(video, (video.videoWidth - width) / 2, (video.videoHeight - height) / 2, width, height, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
+        canvas.width = canvas.height = 1;
+        if (blob && session === scannerSession && !scanLocked && !photoController && !capturingFrame) {
+          const file = new File([blob], "live-barcode.jpg", { type: "image/jpeg" });
+          const isbn = await detectWithBrowser(file) || await scanFileWithLibrary(file).catch(() => null);
+          if (isbn && session === scannerSession && !photoController && !capturingFrame) await lookupIsbn(isbn, "live");
+        }
+      }
+    } catch {
+      // A blurred frame or unavailable decoder should not interrupt live video.
+    } finally {
+      if (session === scannerSession && scanner && elements.scannerDialog.open) scheduleHighResolutionScan(session);
+    }
+  }, 1000);
+}
+
+async function scanBarcodePhoto(file, source = "photo") {
+  if (!file || photoController || scanLocked) return;
+  if (file.size > 10 * 1024 * 1024) {
+    toast("Use a photo smaller than 10 MB, or capture the ISBN from the live camera.", "error");
     return;
   }
+  const session = scannerSession;
+  const controller = new AbortController();
+  photoController = controller;
+  const timeout = setTimeout(() => controller.abort(new Error("Scanning timed out. Try a closer, sharper photo.")), 60000);
+  const check = () => {
+    controller.signal.throwIfAborted();
+    if (session !== scannerSession) throw new DOMException("Scan cancelled", "AbortError");
+  };
+  let ocrError;
+  const readText = async (photo) => {
+    check();
+    if (ocrError) return null;
+    try { return await readPrintedIsbn(photo, controller.signal); }
+    catch (error) {
+      check();
+      // A large original can still work after the bounded neutral resize.
+      if (error.status !== 413) ocrError = error;
+      return null;
+    }
+  };
 
   elements.scanActions.hidden = true;
   elements.scannerShell.hidden = false;
@@ -687,6 +842,8 @@ async function scanBarcodePhoto(file) {
   elements.lookupProgress.hidden = false;
   elements.lookupProgressLabel.textContent = "Reading the ISBN barcode…";
   try {
+    await disposeScanner();
+    check();
     let decodedText = await detectWithBrowser(file);
     if (!decodedText) {
       try {
@@ -699,14 +856,17 @@ async function scanBarcodePhoto(file) {
       elements.lookupProgressLabel.textContent = "Barcode not found—reading the printed ISBN number…";
       const originalCanUseServerOcr = /^image\/(?:jpeg|png|webp|heic|heif)$/i.test(file.type || "")
         || /\.(?:heic|heif)$/i.test(file.name || "");
-      if (originalCanUseServerOcr) decodedText = await readPrintedIsbn(file);
+      check();
+      if (originalCanUseServerOcr) decodedText = await readText(file);
       const prepared = !decodedText ? await enhancedPhotos(file).catch(() => []) : [];
       for (const variant of prepared) {
+        check();
         if (!decodedText) decodedText = await detectWithBrowser(variant);
-        if (!decodedText) decodedText = await readPrintedIsbn(variant);
+        if (!decodedText) decodedText = await readText(variant);
         if (decodedText) break;
       }
       for (const variant of prepared) {
+        check();
         if (decodedText) break;
         try {
           decodedText = await scanFileWithLibrary(variant);
@@ -716,6 +876,7 @@ async function scanBarcodePhoto(file) {
       }
       const contrastVariants = !decodedText ? await enhancedPhotos(file, { contrast: true }).catch(() => []) : [];
       for (const variant of contrastVariants) {
+        check();
         if (!decodedText) decodedText = await detectWithBrowser(variant);
         if (decodedText) break;
         try {
@@ -725,25 +886,36 @@ async function scanBarcodePhoto(file) {
         }
       }
     }
-    if (!decodedText) throw new Error("No valid barcode or printed ISBN was detected");
+    check();
+    if (!decodedText) throw ocrError || new Error("No valid barcode or printed ISBN was detected. Include the printed ISBN, hold still, and use even light.");
     elements.lookupProgress.hidden = true;
-    const accepted = await lookupIsbn(decodedText, "photo");
+    const accepted = await lookupIsbn(decodedText, source);
     if (!accepted && elements.scannerDialog.open) {
       elements.scanActions.hidden = false;
       elements.scannerShell.hidden = true;
     }
-  } catch {
+  } catch (error) {
+    if (session !== scannerSession) return;
     await disposeScanner();
     elements.scanActions.hidden = false;
     elements.scannerShell.hidden = true;
     elements.lookupProgress.hidden = true;
-    toast("We couldn’t read the ISBN. Include the long 978/979 barcode and its printed number, keep the small price barcode outside the guide, and use clear even light.", "error");
+    toast(controller.signal.aborted ? controller.signal.reason.message : error.message, "error");
+  } finally {
+    clearTimeout(timeout);
+    if (photoController === controller) photoController = null;
   }
 }
 
 async function lookupIsbn(rawValue, source = scannerInputMode || "manual") {
   if (scanLocked) return false;
-  const isbn = String(rawValue || "").toUpperCase().replace(/[^0-9X]/g, "");
+  const session = scannerSession;
+  const isbn = cleanIsbn(rawValue);
+  if (source === "live" && elements.continuousScan.checked && isbn === lastContinuousIsbn) return false;
+  if (!isValidIsbn10(isbn) && !isValidIsbn13(isbn)) {
+    if (source !== "live") toast("That ISBN failed its checksum. Check the digits or try another scan.", "error");
+    return false;
+  }
   if (![10, 13].includes(isbn.length)) {
     toast("That doesn’t look like a 10- or 13-digit ISBN.", "error");
     return false;
@@ -758,6 +930,8 @@ async function lookupIsbn(rawValue, source = scannerInputMode || "manual") {
   elements.lookupProgress.hidden = false;
   try {
     const result = await api(`/api/lookup/${encodeURIComponent(isbn)}`);
+    if (session !== scannerSession) return false;
+    if (source === "live" && continueMode) lastContinuousIsbn = isbn;
     await closeScanner();
     if (result.existing) {
       toast("That book is already on your shelf.", "info");
@@ -768,9 +942,11 @@ async function lookupIsbn(rawValue, source = scannerInputMode || "manual") {
     }
     return true;
   } catch (error) {
+    if (session !== scannerSession) return false;
     scanLocked = false;
     elements.lookupProgress.hidden = true;
     if (/No book metadata/.test(error.message)) {
+      if (source === "live" && continueMode) lastContinuousIsbn = isbn;
       await closeScanner();
       openBookForm(
         { isbn13: isbn.length === 13 ? isbn : "", isbn10: isbn.length === 10 ? isbn : "", readingStatus: "unread" },
@@ -1248,6 +1424,7 @@ document.addEventListener("click", (event) => {
 elements.themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 elements.settingsButton.addEventListener("click", openSettings);
 elements.exportButton.addEventListener("click", () => elements.exportDialog.showModal());
+elements.loadMore.addEventListener("click", () => loadBooks({ append: true }));
 elements.detailsEdit.addEventListener("click", () => editDetailBook(false));
 elements.detailsMetadata.addEventListener("click", () => editDetailBook(true));
 elements.settingsForm.addEventListener("submit", saveSettings);

@@ -1,7 +1,8 @@
 FROM node:22-alpine AS dependencies
 WORKDIR /app
-COPY package*.json ./
-RUN npm install --omit=dev
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN npm install --global pnpm@11.19.0 \
+  && pnpm install --prod --frozen-lockfile --ignore-scripts
 
 FROM node:22-alpine
 ENV NODE_ENV=production

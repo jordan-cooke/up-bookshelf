@@ -33,3 +33,15 @@ test("extracts the ISBN labels represented by the real scanner sample set", () =
     ["ISBN 978-1-4351-6278-5", "9781435162785"],
   ]) assert.equal(extractIsbnFromText(label), expected);
 });
+
+test("does not invent ISBN-10 from a damaged or overlong ISBN-13", () => {
+  for (const value of ["ISBN 9780593529871", "ISBN 97805935298791", "ISBN 97805935298740", "ISBN-13 9780306406158"]) {
+    assert.equal(extractIsbnFromText(value), null, value);
+  }
+});
+
+test("refuses ambiguous photos, but accepts matching ISBN-10 and ISBN-13 labels", () => {
+  assert.equal(extractIsbnFromText("ISBN 9780306406157\nISBN 9780547773742"), null);
+  assert.equal(extractIsbnFromText("ISBN-10: 0-306-40615-2\nISBN-13: 9780306406157"), "9780306406157");
+  assert.equal(extractIsbnFromText("ISBN 0-679-45447-0  51799"), "0679454470");
+});

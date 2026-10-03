@@ -7,6 +7,29 @@ import { DatabaseSync } from "node:sqlite";
 import { createBook, initializeDatabase, listBooks, listCollections } from "../src/repository.js";
 import { validateBook } from "../src/validation.js";
 
+test("paginates large collections with stable order and safe sort/limit input", () => {
+  const database = new DatabaseSync(":memory:");
+  try {
+    initializeDatabase(database);
+    for (let index = 0; index < 310; index++) {
+      createBook(database, validateBook({ title: `Book ${String(index).padStart(3, "0")}` }));
+    }
+    const first = listBooks(database, { sort: "title", order: "asc", limit: 100 });
+    const second = listBooks(database, { sort: "title", order: "asc", limit: 100, offset: 100 });
+    assert.equal(first.total, 310);
+    assert.equal(second.total, 310);
+    assert.equal(first.books.length, 100);
+    assert.equal(first.books[99].title, "Book 099");
+    assert.equal(second.books[0].title, "Book 100");
+    assert.equal(new Set([...first.books, ...second.books].map(book => book.id)).size, 200);
+    for (const sort of ["__proto__", "constructor", "title; DROP TABLE books"]) {
+      assert.equal(listBooks(database, { sort, limit: "NaN", offset: -4 }).books.length, 250);
+    }
+    assert.equal(listBooks(database, { limit: 1e10 }).books.length, 310);
+    assert.equal(listBooks(database, { offset: Infinity }).total, 310);
+  } finally { database.close(); }
+});
+
 test("persists the library to a SQLite file across restarts", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "up-bookshelf-test-"));
   const databasePath = path.join(directory, "bookshelf.sqlite");

@@ -575,3 +575,6 @@ html[data-theme="dark"] .skeleton { background: linear-gradient(90deg, #26342d 2
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+/* Large libraries load in batches so mobile browsers keep scrolling smoothly. */
+.load-more-row { display: flex; justify-content: center; margin-top: 2rem; }
+.load-more-row:has(button[hidden]) { display: none; }

@@ -26,7 +26,7 @@ function permittedCoverUrl(value) {
       || hostname === "books.googleusercontent.com"
       || hostname.endsWith(".googleusercontent.com")
       || isAmazonHostname(hostname);
-    if (url.protocol !== "https:" || !permitted) return null;
+    if (url.protocol !== "https:" || !permitted || url.username || url.password || (url.port && url.port !== "443")) return null;
     if (hostname === "covers.openlibrary.org") url.searchParams.set("default", "false");
     if (hostname === "books.google.com" || hostname.endsWith(".googleusercontent.com")) {
       url.searchParams.delete("edge");
@@ -50,18 +50,39 @@ export async function fetchProviderCover({ value, fetchImpl = fetch }) {
   if (!url) return null;
 
   try {
-    const response = await fetchImpl(url, {
-      headers: { "User-Agent": "UPBookshelf/2.3", Accept: "image/avif,image/webp,image/png,image/jpeg" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(12000),
-    });
-    if (response.url && !permittedCoverUrl(response.url)) return null;
+    let target = url;
+    let response;
+    const signal = AbortSignal.timeout(12000);
+    for (let redirects = 0; redirects <= 4; redirects++) {
+      response = await fetchImpl(target, {
+        headers: { "User-Agent": "UPBookshelf/2.6", Accept: "image/avif,image/webp,image/png,image/jpeg" },
+        redirect: "manual",
+        signal,
+      });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      await response.body?.cancel();
+      const location = response.headers.get("location");
+      target = location && permittedCoverUrl(new URL(location, target).href);
+      // Validate each hop BEFORE contacting it, not after following it.
+      if (!target || redirects === 4) return null;
+    }
     const contentType = response.headers.get("content-type")?.split(";")[0].toLowerCase();
     const extension = CONTENT_TYPES.get(contentType);
     const declaredLength = Number(response.headers.get("content-length") || 0);
-    if (!response.ok || !extension || declaredLength > MAX_COVER_BYTES) return null;
+    if (!response.ok || !extension || declaredLength > MAX_COVER_BYTES) {
+      await response.body?.cancel();
+      return null;
+    }
 
-    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!response.body) return null;
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of response.body) {
+      length += chunk.byteLength;
+      if (length > MAX_COVER_BYTES) return null;
+      chunks.push(chunk);
+    }
+    const bytes = Buffer.concat(chunks, length);
     if (bytes.length < 1024 || bytes.length > MAX_COVER_BYTES) return null;
     return { bytes, contentType, extension, url };
   } catch (error) {
@@ -115,7 +136,7 @@ export async function cacheBookCover({ isbn, candidates = [], directory, fetchIm
 
     try {
       const filePath = path.join(directory, `${isbn}.${extension}`);
-      const temporaryPath = path.join(directory, `.${isbn}-${process.pid}-${Date.now()}.tmp`);
+      const temporaryPath = path.join(directory, `.${isbn}-${randomUUID()}.tmp`);
       try {
         await fs.promises.writeFile(temporaryPath, bytes, { flag: "wx" });
         await fs.promises.rename(temporaryPath, filePath);

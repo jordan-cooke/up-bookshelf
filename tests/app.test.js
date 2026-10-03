@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { request as httpRequest } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { createApp } from "../src/app.js";
+import { APP_VERSION, createApp } from "../src/app.js";
 import { initializeDatabase } from "../src/repository.js";
 
 function testDatabase() {
@@ -37,11 +38,11 @@ test("health and empty bookshelf endpoints respond", async () => {
     assert.deepEqual(await health.json(), {
       status: "ok",
       app: "UP Bookshelf",
-      version: "2.5.1",
+      version: APP_VERSION,
       storage: "sqlite",
       authentication: false,
     });
-    assert.equal(health.headers.get("x-up-bookshelf-version"), "2.5.1");
+    assert.equal(health.headers.get("x-up-bookshelf-version"), APP_VERSION);
 
     const config = await (await fetch(`${baseUrl}/api/config`)).json();
     assert.equal(config.appName, "UP Bookshelf");
@@ -61,7 +62,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.equal(page.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(page.headers.get("content-security-policy"), /upgrade-insecure-requests/);
     const html = await page.text();
-    assert.match(html, /styles\.css\?v=2\.5\.1/);
+    assert.match(html, /styles\.css\?v=2\.6\.0/);
     assert.match(html, /capture="environment"/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /id="camera-select"/);
@@ -86,7 +87,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(html, />Book rating</);
     assert.match(html, />Your rating</);
 
-    const stylesheet = await fetch(`${baseUrl}/styles.css?v=2.5.1`);
+    const stylesheet = await fetch(`${baseUrl}/styles.css?v=${APP_VERSION}`);
     assert.equal(stylesheet.status, 200);
     assert.match(stylesheet.headers.get("content-type"), /^text\/css/);
     const css = await stylesheet.text();
@@ -96,7 +97,7 @@ test("serves the styled app shell with safe cache headers", async () => {
     assert.match(css, /\.details-hero/);
     assert.match(css, /\.export-options/);
 
-    const script = await fetch(`${baseUrl}/app.js?v=2.5.1`);
+    const script = await fetch(`${baseUrl}/app.js?v=${APP_VERSION}`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get("content-type"), /^text\/javascript/);
     const javascript = await script.text();
@@ -191,7 +192,8 @@ test("exports a styled Excel catalog and the complete SQLite database", async ()
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-export-test-"));
   const databasePath = path.join(directory, "bookshelf.sqlite");
   try {
-    await withServer({ databasePath }, async (baseUrl) => {
+    await withServer({ databasePath }, async (baseUrl, database) => {
+      database.exec("PRAGMA wal_autocheckpoint = 0");
       await fetch(`${baseUrl}/api/books`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,7 +210,15 @@ test("exports a styled Excel catalog and the complete SQLite database", async ()
       const sqlite = await fetch(`${baseUrl}/api/export/database`);
       assert.equal(sqlite.status, 200);
       assert.match(sqlite.headers.get("content-disposition"), /\.sqlite/);
-      assert.equal(Buffer.from(await sqlite.arrayBuffer()).subarray(0, 16).toString(), "SQLite format 3\u0000");
+      const bytes = Buffer.from(await sqlite.arrayBuffer());
+      assert.equal(bytes.subarray(0, 16).toString(), "SQLite format 3\u0000");
+      const snapshotPath = path.join(directory, "download.sqlite");
+      await fs.promises.writeFile(snapshotPath, bytes);
+      const snapshot = new DatabaseSync(snapshotPath, { readOnly: true });
+      try {
+        assert.equal(snapshot.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+        assert.equal(snapshot.prepare("SELECT title FROM books").get().title, "Parable of the Sower");
+      } finally { snapshot.close(); }
     });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
@@ -384,7 +394,8 @@ test("reads a checksum-validated printed ISBN from a photo", async () => {
   await withServer({
     recognizePrintedIsbn: async (received, options) => {
       assert.deepEqual(received, image);
-      assert.deepEqual(options, { contentType: "image/jpeg" });
+      assert.equal(options.contentType, "image/jpeg");
+      assert.equal(options.signal.aborted, false);
       return "9781649379825";
     },
   }, async (baseUrl) => {
@@ -418,6 +429,51 @@ test("the local library does not require authentication", async () => {
   });
 });
 
+test("API responses are private and missing endpoints return JSON, not app HTML", async () => {
+  await withServer({}, async (baseUrl) => {
+    for (const endpoint of ["/api/books", "/api/config", "/api/stats", "/api/export"]) {
+      assert.equal((await fetch(baseUrl + endpoint)).headers.get("cache-control"), "no-store");
+    }
+    const missing = await fetch(baseUrl + "/api/does-not-exist");
+    assert.equal(missing.status, 404);
+    assert.match(missing.headers.get("content-type"), /application\/json/);
+  });
+});
+
+test("cross-origin browser requests cannot read or change the private library", async () => {
+  await withServer({}, async (baseUrl) => {
+    for (const headers of [{ Origin: "https://untrusted.example" }, { Origin: "null" }, { "Sec-Fetch-Site": "cross-site" }]) {
+      assert.equal((await fetch(baseUrl + "/api/export/database", { headers })).status, 403);
+      assert.equal((await fetch(baseUrl + "/api/books", {
+        method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ title: "Blocked" }),
+      })).status, 403);
+    }
+    assert.equal((await fetch(baseUrl + "/api/books", { headers: { Origin: baseUrl } })).status, 200);
+    assert.equal((await (await fetch(baseUrl + "/api/books")).json()).total, 0);
+  });
+});
+
+test("HTTPS proxy origin is accepted when it preserves the external Host", async () => {
+  await withServer({ trustProxy: true }, async (baseUrl) => {
+    const status = await new Promise((resolve, reject) => {
+      const request = httpRequest(baseUrl + "/api/config", { headers: {
+        Host: "bookshelf.example:4436", Origin: "https://bookshelf.example:4436", "X-Forwarded-Proto": "https",
+      } }, response => { response.resume(); resolve(response.statusCode); });
+      request.on("error", reject);
+      request.end();
+    });
+    assert.equal(status, 200);
+  });
+});
+
+test("unsupported OCR content types never reach the decoder", async () => {
+  await withServer({ recognizePrintedIsbn: () => assert.fail("must not decode") }, async (baseUrl) => {
+    assert.equal((await fetch(baseUrl + "/api/scan/isbn-text", {
+      method: "POST", headers: { "Content-Type": "image/svg+xml" }, body: "<svg/>",
+    })).status, 415);
+  });
+});
+
 test("serves cached covers from the persistent data directory", async () => {
   const coverDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-app-covers-"));
   try {
@@ -426,7 +482,7 @@ test("serves cached covers from the persistent data directory", async () => {
       const cover = await fetch(`${baseUrl}/api/covers/9781399745413.jpg`);
       assert.equal(cover.status, 200);
       assert.equal(cover.headers.get("content-type"), "image/jpeg");
-      assert.match(cover.headers.get("cache-control"), /immutable/);
+      assert.equal(cover.headers.get("cache-control"), "private, no-cache");
       assert.equal((await cover.arrayBuffer()).byteLength, 2048);
       assert.equal((await fetch(`${baseUrl}/api/covers/not-a-cover.jpg`)).status, 404);
     });

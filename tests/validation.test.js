@@ -48,3 +48,8 @@ test("allows a locally cached Bookshelf cover", () => {
   const custom = validateBook({ title: "Book", coverUrl: "/api/covers/custom-123e4567-e89b-12d3-a456-426614174000.jpg" });
   assert.equal(custom.coverUrl, "/api/covers/custom-123e4567-e89b-12d3-a456-426614174000.jpg");
 });
+test("rejects mismatched editions and non-object book payloads", () => {
+  assert.throws(() => validateBook({ title: "Wrong edition", isbn10: "0306406152", isbn13: "9780547773742" }), /same edition/);
+  assert.throws(() => validateBook(null), /book object/);
+  assert.throws(() => validateBook([]), /book object/);
+});

@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { backup } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import helmet from "helmet";
@@ -8,6 +10,7 @@ import { checkAmazonCookie, isSupportedAmazonMarketplace, lookupBookMetadata, se
 import { cacheBookCover, coverCacheState, fetchProviderCover, saveUploadedCover } from "./covers.js";
 import { createBookshelfWorkbook } from "./excel.js";
 import { recognizeIsbnImage } from "./ocr.js";
+import { OcrError } from "./ocr-service.js";
 import {
   createBook,
   deleteAppSettings,
@@ -26,9 +29,9 @@ import {
 import { validateBook, validateCoverUrl, ValidationError } from "./validation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP_VERSION = "2.5.1";
+export const APP_VERSION = "2.6.0";
 export const DEFAULT_TAGLINE = "Every good story,\nright where you left it.";
-const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
+const REQUIRED_ASSETS = ["index.html", "styles.css", "app.js", "isbn.js", "icon.svg", "manifest.webmanifest"];
 
 function numericId(request, response, next) {
   const id = Number(request.params.id);
@@ -146,15 +149,55 @@ export function createApp({
       },
     }),
   );
+  // Serve preserves Host; do not compare the internal proxy's HTTP protocol.
+  app.use("/api", (request, response, next) => {
+    response.set("Cache-Control", "no-store");
+    const origin = request.get("origin");
+    let differentOrigin = false;
+    if (origin) {
+      try { differentOrigin = new URL(origin).host !== request.get("host"); }
+      catch { differentOrigin = true; }
+    }
+    if (differentOrigin || request.get("sec-fetch-site") === "cross-site") {
+      return response.status(403).json({ error: "Open Bookshelf directly to access its API." });
+    }
+    return next();
+  });
+
   app.use(express.json({ limit: "2mb" }));
 
-  app.post("/api/scan/isbn-text", express.raw({ type: "image/*", limit: "10mb" }), async (request, response, next) => {
+  let incomingScans = 0;
+  const admitScan = (_request, response, next) => {
+    if (incomingScans >= 2) return response.status(429).set("Retry-After", "3").json({ error: "The ISBN reader is busy. Please try again in a moment." });
+    incomingScans++;
+    const release = () => {
+      incomingScans--;
+      response.off("finish", release);
+      response.off("close", release);
+    };
+    response.once("finish", release);
+    response.once("close", release);
+    next();
+  };
+  app.post("/api/scan/isbn-text", admitScan, express.raw({ type: "image/*", limit: "10mb" }), async (request, response, next) => {
     try {
       if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
         return response.status(400).json({ error: "Send a JPEG, PNG, WebP, HEIC, or HEIF photo of the printed ISBN." });
       }
       const contentType = request.get("content-type")?.split(";", 1)[0] || "";
-      const isbn = cleanIsbn(await recognizePrintedIsbn(request.body, { contentType }));
+      if (!/^image\/(?:jpeg|png|webp|heic|heif)$/i.test(contentType)) {
+        return response.status(415).json({ error: "Use a JPEG, PNG, WebP, HEIC, or HEIF photo." });
+      }
+      const controller = new AbortController();
+      const cancel = () => { if (!response.writableEnded) controller.abort(); };
+      response.once("close", cancel);
+      let isbn;
+      try {
+        isbn = cleanIsbn(await recognizePrintedIsbn(request.body, { contentType, signal: controller.signal }));
+      } finally {
+        response.off("close", cancel);
+      }
+      if (controller.signal.aborted) return;
       if (!isValidIsbn10(isbn) && !isValidIsbn13(isbn)) {
         return response.status(422).json({ error: "No valid printed ISBN was found in that photo." });
       }
@@ -256,6 +299,7 @@ export function createApp({
           order: request.query.order,
           collection: request.query.collection,
           limit: request.query.limit,
+          offset: request.query.offset,
         }),
       );
     } catch (error) {
@@ -432,7 +476,9 @@ export function createApp({
       }
       response.set("Cache-Control", state.provider === "amazon"
         ? `public, max-age=${state.maxAge}, must-revalidate`
-        : "public, max-age=31536000, immutable");
+        : request.params.filename.startsWith("custom-")
+          ? "private, max-age=31536000, immutable"
+          : "private, no-cache");
       return response.sendFile(state.filePath);
     } catch (error) {
       return next(error);
@@ -481,18 +527,24 @@ export function createApp({
     }
   });
 
-  app.get("/api/export/database", (_request, response, next) => {
+  app.get("/api/export/database", async (_request, response, next) => {
+    let temporaryDirectory;
     try {
       if (!databasePath || !fs.existsSync(databasePath)) {
         return response.status(503).json({ error: "A full database download is only available from a file-backed bookshelf." });
       }
-      database.exec("PRAGMA wal_checkpoint(FULL)");
+      temporaryDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-bookshelf-backup-"));
+      const snapshot = path.join(temporaryDirectory, "bookshelf.sqlite");
+      await backup(database, snapshot);
+      await fs.promises.chmod(snapshot, 0o600);
       const date = new Date().toISOString().slice(0, 10);
       response.set("Cache-Control", "no-store");
-      return response.download(databasePath, `bookshelf-database-${date}.sqlite`, (error) => {
+      return response.download(snapshot, `bookshelf-database-${date}.sqlite`, (error) => {
+        fs.promises.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
         if (error && !response.headersSent) next(error);
       });
     } catch (error) {
+      if (temporaryDirectory) await fs.promises.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
       return next(error);
     }
   });
@@ -512,6 +564,7 @@ export function createApp({
     });
   });
 
+  app.use("/api", (_request, response) => response.status(404).json({ error: "API endpoint not found." }));
   app.use("/vendor/html5-qrcode", express.static(path.join(ROOT, "node_modules", "html5-qrcode"), { maxAge: "1y", immutable: true }));
   app.use(
     express.static(path.join(ROOT, "public"), {
@@ -529,6 +582,13 @@ export function createApp({
   });
 
   app.use((error, _request, response, _next) => {
+    if (response.destroyed || response.headersSent) return;
+    if (error instanceof OcrError) {
+      if (error.status === 429) response.set("Retry-After", "3");
+      return response.status(error.status).json({ error: error.message });
+    }
+    if (error.type === "entity.too.large") return response.status(413).json({ error: "That image or request is too large. Use a smaller photo." });
+    if (error.type === "entity.parse.failed") return response.status(400).json({ error: "Send a valid JSON object." });
     if (error instanceof ValidationError) return response.status(error.status).json({ error: error.message });
     if (error?.code === "ERR_SQLITE_ERROR" && /UNIQUE constraint failed: books\.isbn_/.test(error.message)) {
       return response.status(409).json({ error: "That ISBN is already in your bookshelf." });

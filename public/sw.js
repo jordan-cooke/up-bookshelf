@@ -1,5 +1,5 @@
-const CACHE = "up-bookshelf-v16";
-const SHELL = ["/", "/styles.css?v=2.5.1", "/app.js?v=2.5.1", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
+const CACHE = "up-bookshelf-v17";
+const SHELL = ["/", "/styles.css?v=2.6.0", "/app.js?v=2.6.0", "/isbn.js", "/icon.svg", "/manifest.webmanifest", "/vendor/html5-qrcode/html5-qrcode.min.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
@@ -7,13 +7,13 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))));
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith("up-bookshelf-") && key !== CACHE).map((key) => caches.delete(key)))));
   self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
   const requestUrl = new URL(event.request.url);
-  if (event.request.method !== "GET" || requestUrl.pathname.startsWith("/api/")) return;
+  if (event.request.method !== "GET" || requestUrl.origin !== self.location.origin || !SHELL.includes(requestUrl.pathname + requestUrl.search)) return;
   event.respondWith(
     fetch(event.request)
       .then((response) => {

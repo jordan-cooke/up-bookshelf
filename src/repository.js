@@ -185,13 +185,16 @@ export function listBooks(database, options = {}) {
   }
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const sortColumn = SORT_COLUMNS[options.sort] || SORT_COLUMNS.added;
+  const sortColumn = Object.hasOwn(SORT_COLUMNS, options.sort) ? SORT_COLUMNS[options.sort] : SORT_COLUMNS.added;
   const direction = options.order === "asc" ? "ASC" : "DESC";
-  const limit = Math.min(Math.max(Number(options.limit) || 250, 1), 1000);
+  const numericLimit = Number(options.limit);
+  const limit = Number.isFinite(numericLimit) && numericLimit > 0 ? Math.min(Math.trunc(numericLimit), 1000) || 1 : 250;
+  const numericOffset = Number(options.offset);
+  const offset = Number.isFinite(numericOffset) ? Math.min(Math.max(Math.trunc(numericOffset), 0), 1000000) : 0;
 
   const rows = database
-    .prepare(`SELECT * FROM books ${whereSql} ORDER BY ${sortColumn} ${direction}, id ${direction} LIMIT ${limit}`)
-    .all(...parameters);
+    .prepare(`SELECT * FROM books ${whereSql} ORDER BY ${sortColumn} COLLATE NOCASE ${direction}, id ${direction} LIMIT ? OFFSET ?`)
+    .all(...parameters, limit, offset);
   const count = database.prepare(`SELECT COUNT(*) AS total FROM books ${whereSql}`).get(...parameters);
   return { books: rows.map(mapBook), total: Number(count.total) };
 }

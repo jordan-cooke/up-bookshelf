@@ -13,11 +13,12 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Lets the user choose any detected phone camera and remembers that choice
 - Suggests a likely rear/main camera without forcing it
 - Offers a flashlight control when the selected camera and browser support it
-- Scans a larger live-camera region at a higher frame rate and requests continuous focus when the browser supports it
+- Supplements live scanning with a periodic high-resolution barcode crop and requests continuous focus when the browser supports it
 - Retries captured photos with full-frame and focused, high-contrast image passes
 - Falls back to locally reading the printed ISBN digits when the barcode bars will not scan
 - Accepts iPhone HEIC/HEIF photos directly and normalizes them inside the container
 - Validates OCR results with the ISBN checksum before any metadata lookup
+- Rejects ambiguous OCR results and avoids guessing an ISBN-10 from damaged ISBN-13 digits
 - Rejects retail/product barcodes and the small five-digit price supplement
 - Looks up multiple editions through Open Library, Google Books, and either optional Amazon connection method
 - Shows every cover returned by the configured providers and lets the user upload a custom cover
@@ -27,13 +28,14 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 - Edits existing books and refreshes their provider choices at any time
 - Creates custom collections and filters or sorts the shelf by collection
 - Searches, sorts, filters, and tracks reading status
+- Loads large collections in batches, with a Load more books control
 - Keeps provider/community book ratings separate from the reader's own star rating
 - Stores private notes and exports the library as JSON, a formatted Excel workbook, or the complete SQLite database
 - Includes light and dark themes
 - Lets the owner change the bookshelf name and welcome message in the app
 - Installs to a phone home screen as a PWA
 
-Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, local printed-ISBN reader, embedded SQLite support, and local cover cache. No separate database container is required. Printed-ISBN photos are processed inside the container and are not saved. The application makes outbound provider requests only during metadata lookup; the library and chosen covers remain in the mounted appdata directory.
+Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, local printed-ISBN reader, embedded SQLite support, and local cover cache. No separate database container is required. Printed-ISBN photos are processed inside the container and are not saved or sent to metadata providers. Metadata and cover fetching contact the configured providers; the library and chosen covers remain in the mounted appdata directory.
 
 ## Unraid quick start with Compose Manager
 
@@ -122,6 +124,8 @@ The live scanner lists every camera the browser exposes. It marks a likely rear/
 
 Enable **Continuous scan** inside the scanner when adding a large collection. The preference is remembered on that phone. After each new book is saved, live scanning starts again automatically. Photo scanning returns directly to the scanner so the next camera photo is only one tap away. Duplicate books are reported and skipped without interrupting the batch.
 
+Continuous live scanning ignores repeated frames of the last accepted ISBN until a different book is shown. Closing and reopening the scanner resets the repeated-book guard. The live reader requests higher camera resolution when supported and periodically checks a sharper crop without opening a second camera. If the bars are damaged, **Read printed ISBN** captures a frame and tries the locally hosted text reader. Scanning attempts can be cancelled by closing the scanner.
+
 For the most reliable scan:
 
 - Place the long 978/979 barcode inside the guide.
@@ -156,6 +160,8 @@ The download icon in the app offers three formats:
 - **Excel workbook:** a formatted and filterable Books sheet plus a Summary sheet with reading-status and collection totals.
 - **Book backup:** human-readable JSON containing the book catalog only. Provider credentials are excluded.
 - **Complete SQLite database:** a restorable copy of the live database, including books, personalization, settings, API keys, and any saved Amazon cookie. Protect this file like a password.
+
+Database downloads use SQLite's online backup facility so each download is a consistent snapshot while the app remains running. Cover files are stored separately; include the entire data directory when backing up covers as well as book records.
 
 For automated server backups, include:
 
@@ -193,18 +199,20 @@ Confirm the running version:
 curl http://127.0.0.1:3080/api/health
 ```
 
-Release 2.5.1 tunes scanning against a six-photo real-world barcode set, prioritizes the original and neutral high-resolution image before high-contrast fallbacks, and adds direct HEIC/HEIF conversion for iPhone photos. All six supplied labels are recognized in browser and server-side tests, including an older ISBN-10 edition. Existing books, covers, settings, and secrets are preserved automatically.
+Release 2.6.0 adds a high-resolution live barcode pass, safer printed-ISBN parsing, cancellable scans, bounded OCR work in a separate worker, and large-library pagination. It also validates cover redirect destinations before contacting them, limits streamed image downloads, creates consistent database snapshots, updates vulnerable dependencies, and builds from the checked-in lockfile. Existing books, covers, settings, and provider credentials are preserved.
 
 ## Local development
 
 Node.js 22.16 or newer is required. SQLite is built into Node.
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile --ignore-scripts
 cp .env.example .env
 pnpm start
 pnpm test
 ```
+
+The optional `scripts/browser-smoke.mjs` exercises a simulated live camera, rotated and low-contrast generated barcodes, printed-number OCR, continuous scanning, and pagination in a real browser. It needs a separate Playwright installation; set `PLAYWRIGHT_MODULE` to that installation's module URL and optionally `BROWSER_CHANNEL` to an installed Chromium browser channel. Real phone focus, torch, and lens behavior still require device testing. The local-only `scripts/benchmark-scanner.mjs` accepts a directory containing the original six HEIC regression samples; those personal photos are not committed.
 
 ## License
 

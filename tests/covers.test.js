@@ -19,6 +19,59 @@ test("fetches an approved provider cover for same-origin previews", async () => 
   assert.equal(cover.bytes.length, 2048);
 });
 
+test("blocks redirects to private or unapproved hosts before contacting them", async () => {
+  let calls = 0;
+  const result = await fetchProviderCover({
+    value: "https://books.google.com/cover",
+    fetchImpl: async (_url, options) => {
+      calls++;
+      assert.equal(options.redirect, "manual");
+      return new Response(null, { status: 302, headers: { Location: "http://127.0.0.1/private" } });
+    },
+  });
+  assert.equal(result, null);
+  assert.equal(calls, 1);
+});
+
+test("follows approved cover redirects with a finite hop limit", async () => {
+  let calls = 0;
+  const result = await fetchProviderCover({
+    value: "https://books.google.com/cover",
+    fetchImpl: async () => {
+      calls++;
+      return calls === 1
+        ? new Response(null, { status: 302, headers: { Location: "https://books.googleusercontent.com/cover.jpg" } })
+        : new Response(Buffer.alloc(2048), { headers: { "content-type": "image/jpeg" } });
+    },
+  });
+  assert.equal(result.bytes.length, 2048);
+  calls = 0;
+  assert.equal(await fetchProviderCover({
+    value: "https://books.google.com/cover",
+    fetchImpl: async () => { calls++; return new Response(null, { status: 302, headers: { Location: "/cover" } }); },
+  }), null);
+  assert.equal(calls, 5);
+});
+
+test("rejects credentials and nonstandard ports in provider URLs", async () => {
+  for (const value of ["https://user:secret@books.google.com/cover", "https://books.google.com:8080/cover"]) {
+    assert.equal(await fetchProviderCover({ value, fetchImpl: () => assert.fail("must not fetch") }), null);
+  }
+});
+
+test("stops oversized chunked downloads without trusting Content-Length", async () => {
+  let cancelled = false;
+  const result = await fetchProviderCover({
+    value: "https://books.google.com/cover",
+    fetchImpl: async () => new Response(new ReadableStream({
+      pull(controller) { controller.enqueue(new Uint8Array(1024 * 1024)); },
+      cancel() { cancelled = true; },
+    }), { headers: { "content-type": "image/jpeg" } }),
+  });
+  assert.equal(result, null);
+  assert.equal(cancelled, true);
+});
+
 test("downloads an approved cover into persistent storage", async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "up-covers-"));
   try {
