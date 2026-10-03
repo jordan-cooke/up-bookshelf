@@ -1,0 +1,84 @@
+name: Publish Docker image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-container
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Install and test
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm test
+      - name: Set up Docker builder
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Read image version
+        id: version
+        run: echo "version=$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')" >> "$GITHUB_OUTPUT"
+      - name: Build image for Unraid
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: up-bookshelf:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Check actual container startup
+        run: |
+          docker run -d --name bookshelf-smoke -p 127.0.0.1:3080:3000 up-bookshelf:smoke
+          trap 'docker logs bookshelf-smoke; docker rm -f bookshelf-smoke' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3080/api/health > /tmp/bookshelf-health.json; then
+              node -e 'const h = JSON.parse(require("fs").readFileSync("/tmp/bookshelf-health.json")); if(h.status !== "ok" || h.version !== require("./package.json").version) process.exit(1)'
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/jordan-cooke/up-bookshelf:latest
+            ghcr.io/jordan-cooke/up-bookshelf:${{ steps.version.outputs.version }}
+            ghcr.io/jordan-cooke/up-bookshelf:sha-${{ github.sha }}
+          cache-from: type=gha
+          labels: |
+            org.opencontainers.image.title=UP (Ur Private) Bookshelf
+            org.opencontainers.image.source=https://github.com/jordan-cooke/up-bookshelf
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}

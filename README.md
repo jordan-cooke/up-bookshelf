@@ -37,6 +37,14 @@ Every new installation starts as **UP Bookshelf** with the motto “Every good s
 
 Everything needed to run the application is in one Docker image: the Node server, web interface, barcode reader, local printed-ISBN reader, embedded SQLite support, and local cover cache. No separate database container is required. Printed-ISBN photos are processed inside the container and are not saved or sent to metadata providers. Metadata and cover fetching contact the configured providers; the library and chosen covers remain in the mounted appdata directory.
 
+## Unraid Docker interface (published image)
+
+The GitHub publishing workflow tests the code, builds a Linux AMD64 image for Unraid, checks actual container startup, and publishes `ghcr.io/jordan-cooke/up-bookshelf:latest` on pushes to `main`. Version and commit tags are also published. The first package must be made public in GitHub's package settings before anonymous pulls work.
+
+In **Docker → Add Container**, use that image as the **Repository**, Bridge networking, TCP host port `3080` mapped to container port `3000`, and a read/write appdata directory mapped to `/data`. Set variable key `DB_PATH` to value `/data/bookshelf.sqlite`; set `TRUST_PROXY` to `1` when using a trusted reverse proxy such as Tailscale Serve. Set **WebUI** to `http://[IP]:[PORT:3000]`. Privileged mode is not needed. Stop any previous container using port 3080 before starting the replacement.
+
+For an existing installation, keep its exact host data path (for example `/mnt/user/appdata/jnc-bookshelf/data`) so books, covers and settings remain available. Back up appdata before switching images. Updates can then be installed from Unraid's Docker interface without rebuilding source locally. This does not automatically submit the app to Community Applications.
+
 ## Unraid quick start with Compose Manager
 
 1. Clone the repository into appdata:
