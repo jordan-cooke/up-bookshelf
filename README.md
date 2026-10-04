@@ -43,6 +43,8 @@ The GitHub publishing workflow tests the code, builds a Linux AMD64 image for Un
 
 In **Docker → Add Container**, use that image as the **Repository**, Bridge networking, TCP host port `3080` mapped to container port `3000`, and a read/write appdata directory mapped to `/data`. Set variable key `DB_PATH` to value `/data/bookshelf.sqlite`; set `TRUST_PROXY` to `1` when using a trusted reverse proxy such as Tailscale Serve. Set **WebUI** to `http://[IP]:[PORT:3000]`. Privileged mode is not needed. Stop any previous container using port 3080 before starting the replacement.
 
+Set **Icon URL** to `https://raw.githubusercontent.com/jordan-cooke/up-bookshelf/main/public/icon.png` for the app's book emblem in Unraid. This public 256×256 PNG does not require registry credentials.
+
 For an existing installation, keep its exact host data path (for example `/mnt/user/appdata/jnc-bookshelf/data`) so books, covers and settings remain available. Back up appdata before switching images. Updates can then be installed from Unraid's Docker interface without rebuilding source locally. This does not automatically submit the app to Community Applications.
 
 ## Unraid quick start with Compose Manager
